@@ -92,7 +92,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.0</div>
+  <div class="sub">OFICA Representaciones · v2.1</div>
 </div>
 
 <div class="wrap">
@@ -194,9 +194,44 @@ function guardarComercioDeFila(f){
   return true;
 }
 
+/* ---------- Tasa de cambio del BCV (base de datos local, diaria) ---------- */
+// Mismo método que la app de cobranza: dolarapi (campo 'promedio' = tasa oficial BCV, con CORS).
+// Se guarda en localStorage por fecha; se alimenta automáticamente cada día que se abre la app.
+const TASA_API='https://ve.dolarapi.com/v1/dolares/oficial';
+const pad2=n=>String(n).padStart(2,'0');
+const hoyIso=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
+let TASAS_BCV=(()=>{ try{ return JSON.parse(localStorage.getItem('tasasBCV')||'{}'); }catch(e){ return {}; } })();
+function guardarTasasBCV(){ try{ localStorage.setItem('tasasBCV', JSON.stringify(TASAS_BCV)); }catch(e){} }
+async function actualizarTasaHoy(){
+  const iso=hoyIso();
+  if(TASAS_BCV[iso]!=null) return TASAS_BCV[iso];   // ya la tenemos guardada hoy
+  try{
+    const r=await fetch(TASA_API+'?t='+Date.now(),{cache:'no-store'});
+    if(!r.ok) throw 0;
+    const j=await r.json();
+    const usd=Number(j.promedio);
+    if(usd>0){ TASAS_BCV[iso]=usd; guardarTasasBCV(); return usd; }
+  }catch(e){ /* sin internet o API caída: se usa lo que haya guardado */ }
+  return TASAS_BCV[iso]!=null?TASAS_BCV[iso]:null;
+}
+function isoDeFecha(fh){
+  const m=(fh||'').match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+  if(!m) return null;
+  let d=m[1], mo=m[2], y=m[3]; if(y.length===2) y='20'+y;
+  return y+'-'+pad2(mo)+'-'+pad2(d);
+}
+// Tasa para la fecha de la factura; si no la hay, la más reciente guardada.
+function tasaParaFecha(fh){
+  const iso=isoDeFecha(fh);
+  if(iso && TASAS_BCV[iso]!=null) return TASAS_BCV[iso];
+  const ks=Object.keys(TASAS_BCV).sort();
+  return ks.length? TASAS_BCV[ks[ks.length-1]] : null;
+}
+
 /* ---------- Utilidades de números (formato venezolano) ---------- */
 function numVE(s){
   if(s==null) return null;
+  if(typeof s==='number') return isNaN(s)?null:s;   // ya es número (p.ej. la tasa 36.5847): devolver tal cual
   s=String(s).replace(/[^\d.,]/g,'');   // deja solo dígitos, puntos y comas (quita espacios, 'Bs', etc.)
   if(!s) return null;
   // El último separador seguido de exactamente 2 dígitos es el decimal; el resto son miles.
@@ -400,6 +435,10 @@ function baseDe(f){
   const iva=numVE(f.iva), tot=numVE(f.monto_total);
   return (iva!=null&&tot!=null)? Math.round((tot-iva)*100)/100 : null;
 }
+function totalUsd(f){
+  const tot=numVE(f.monto_total), tasa=numVE(f.tasa_cambio);
+  return (tot!=null&&tasa>0)? Math.round((tot/tasa)*100)/100 : null;
+}
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // Crea un campo con etiqueta e input, enlazado a filas[i][clave]
@@ -438,6 +477,10 @@ function pintarFormularios(){
         campo(i,'iva','IVA',fmt(numVE(f.iva)),'0,00',{num:true})+
         campo(i,'base','Base (Total − IVA)',fmt(base),'',{num:true,ro:true})+
       `</div>`+
+      `<div class="fgrid">`+
+        campo(i,'tasa_cambio','Tasa de cambio BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true})+
+        campo(i,'total_usd','Total en $',fmt(totalUsd(f)),'',{num:true,ro:true})+
+      `</div>`+
       `<div class="flinks">`+
         `<button type="button" class="link" data-ver>Ver texto leído</button>`+
         `<button type="button" class="link" data-copiar>Copiar texto</button>`+
@@ -452,6 +495,8 @@ function pintarFormularios(){
         filas[i][inp.dataset.k]=inp.value.trim();
         const b=card.querySelector('input[data-k="base"]');
         if(b) b.value=fmt(baseDe(filas[i]));
+        const u=card.querySelector('input[data-k="total_usd"]');
+        if(u) u.value=fmt(totalUsd(filas[i]));
       });
     });
     card.querySelector('[data-del]').addEventListener('click',()=>{ filas.splice(i,1); pintarFormularios(); });
@@ -487,6 +532,8 @@ async function procesar(files){
   $('scStart').style.display='none';
   $('scResult').style.display='none';
   $('progress').style.display='block';
+  $('pmsg').textContent='Consultando tasa del BCV…';
+  await actualizarTasaHoy();        // alimenta la tasa del día desde el BCV (dolarapi)
   $('pmsg').textContent='Preparando OCR…';
   const worker=await crearWorker();
   for(let i=0;i<files.length;i++){
@@ -503,10 +550,11 @@ async function procesar(files){
       d.direccion_fiscal='';
       const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
       if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
+      d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV para la fecha de la factura
       filas.push({archivo:f.name, texto:text, ...d});
     }catch(e){
       console.error(e);
-      filas.push({archivo:f.name, texto:'', comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null, direccion_fiscal:''});
+      filas.push({archivo:f.name, texto:'', comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null, direccion_fiscal:'', tasa_cambio:tasaParaFecha('')});
     }
   }
   await worker.terminate();
@@ -517,10 +565,10 @@ async function procesar(files){
 
 /* ---------- Exportación ---------- */
 function matriz(){
-  const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Base','IVA','Total'];
+  const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Base','IVA','Total','Tasa de cambio','Total en $'];
   const rows=[enc];
   filas.forEach(f=>{
-    rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(baseDe(f)),fmt(numVE(f.iva)),fmt(numVE(f.monto_total))]);
+    rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(baseDe(f)),fmt(numVE(f.iva)),fmt(numVE(f.monto_total)),fmt(numVE(f.tasa_cambio)),fmt(totalUsd(f))]);
   });
   return rows;
 }
