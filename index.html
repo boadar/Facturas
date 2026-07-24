@@ -82,6 +82,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .fld input.ro{background:#eef4f8;color:var(--mut);font-weight:600}
 .fld .num{text-align:right;font-variant-numeric:tabular-nums}
 .fgrid .full{grid-column:1/-1}
+.fld.c label{text-align:center}
 .recon{display:inline-block;font-size:10px;font-weight:700;color:var(--ok);background:#e1f5ee;border-radius:6px;padding:2px 7px;margin-left:8px;vertical-align:middle}
 .flinks{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
 .link{color:var(--acc);background:none;border:none;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;padding:0}
@@ -92,7 +93,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.1</div>
+  <div class="sub">OFICA Representaciones · v2.2</div>
 </div>
 
 <div class="wrap">
@@ -435,10 +436,11 @@ function baseDe(f){
   const iva=numVE(f.iva), tot=numVE(f.monto_total);
   return (iva!=null&&tot!=null)? Math.round((tot-iva)*100)/100 : null;
 }
-function totalUsd(f){
-  const tot=numVE(f.monto_total), tasa=numVE(f.tasa_cambio);
-  return (tot!=null&&tasa>0)? Math.round((tot/tasa)*100)/100 : null;
+function enUsd(vBs,f){
+  const tasa=numVE(f.tasa_cambio);
+  return (vBs!=null&&tasa>0)? Math.round((vBs/tasa)*100)/100 : null;
 }
+function totalUsd(f){ return enUsd(numVE(f.monto_total), f); }
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // Crea un campo con etiqueta e input, enlazado a filas[i][clave]
@@ -446,7 +448,8 @@ function campo(i,clave,etiqueta,val,ph,opts){
   opts=opts||{};
   const cls=(opts.num?'num ':'')+(opts.ro?'ro':'');
   const attrs=(opts.ro?'readonly ':'')+(opts.num?'inputmode="decimal" ':'');
-  return `<div class="fld${opts.full?' full':''}"><label>${etiqueta}</label>`+
+  const fldCls='fld'+(opts.full?' full':'')+(opts.center?' c':'');
+  return `<div class="${fldCls}"><label>${etiqueta}</label>`+
     `<input class="${cls.trim()}" data-i="${i}" data-k="${clave}" ${attrs}value="${esc(val)}" placeholder="${esc(ph||'')}"></div>`;
 }
 
@@ -468,18 +471,22 @@ function pintarFormularios(){
         campo(i,'comercio','Comercio',f.comercio,'Nombre del comercio')+
         campo(i,'rif_comercio','RIF del comercio',f.rif_comercio,'J-12345678-9')+
         campo(i,'direccion_fiscal','Dirección fiscal del comercio',f.direccion_fiscal,'Dirección del comercio',{full:true})+
-        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA HH:MM')+
+      `</div>`+
+      `<div class="fgrid tres">`+
+        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA')+
+        campo(i,'tasa_cambio','Tasa BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true})+
         campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000')+
       `</div>`+
       `<div class="fsection">Montos</div>`+
       `<div class="fgrid tres">`+
-        campo(i,'monto_total','Total',fmt(numVE(f.monto_total)),'0,00',{num:true})+
-        campo(i,'iva','IVA',fmt(numVE(f.iva)),'0,00',{num:true})+
-        campo(i,'base','Base (Total − IVA)',fmt(base),'',{num:true,ro:true})+
+        campo(i,'base','BASE Bs.',fmt(base),'',{num:true,ro:true,center:true})+
+        campo(i,'iva','IVA Bs.',fmt(numVE(f.iva)),'0,00',{num:true,center:true})+
+        campo(i,'monto_total','TOTAL Bs.',fmt(numVE(f.monto_total)),'0,00',{num:true,center:true})+
       `</div>`+
-      `<div class="fgrid">`+
-        campo(i,'tasa_cambio','Tasa de cambio BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true})+
-        campo(i,'total_usd','Total en $',fmt(totalUsd(f)),'',{num:true,ro:true})+
+      `<div class="fgrid tres">`+
+        campo(i,'base_usd','BASE $',fmt(enUsd(base,f)),'',{num:true,ro:true,center:true})+
+        campo(i,'iva_usd','IVA $',fmt(enUsd(numVE(f.iva),f)),'',{num:true,ro:true,center:true})+
+        campo(i,'total_usd','TOTAL $',fmt(totalUsd(f)),'',{num:true,ro:true,center:true})+
       `</div>`+
       `<div class="flinks">`+
         `<button type="button" class="link" data-ver>Ver texto leído</button>`+
@@ -493,10 +500,10 @@ function pintarFormularios(){
     card.querySelectorAll('input:not([readonly])').forEach(inp=>{
       inp.addEventListener('input',()=>{
         filas[i][inp.dataset.k]=inp.value.trim();
-        const b=card.querySelector('input[data-k="base"]');
-        if(b) b.value=fmt(baseDe(filas[i]));
-        const u=card.querySelector('input[data-k="total_usd"]');
-        if(u) u.value=fmt(totalUsd(filas[i]));
+        const f=filas[i], set=(k,v)=>{const el=card.querySelector('input[data-k="'+k+'"]'); if(el) el.value=fmt(v);};
+        const bs=baseDe(f);
+        set('base',bs); set('base_usd',enUsd(bs,f));
+        set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
       });
     });
     card.querySelector('[data-del]').addEventListener('click',()=>{ filas.splice(i,1); pintarFormularios(); });
@@ -565,10 +572,11 @@ async function procesar(files){
 
 /* ---------- Exportación ---------- */
 function matriz(){
-  const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Base','IVA','Total','Tasa de cambio','Total en $'];
+  const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Tasa de cambio','BASE Bs.','IVA Bs.','TOTAL Bs.','BASE $','IVA $','TOTAL $'];
   const rows=[enc];
   filas.forEach(f=>{
-    rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(baseDe(f)),fmt(numVE(f.iva)),fmt(numVE(f.monto_total)),fmt(numVE(f.tasa_cambio)),fmt(totalUsd(f))]);
+    const bs=baseDe(f);
+    rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(numVE(f.tasa_cambio)),fmt(bs),fmt(numVE(f.iva)),fmt(numVE(f.monto_total)),fmt(enUsd(bs,f)),fmt(enUsd(numVE(f.iva),f)),fmt(totalUsd(f))]);
   });
   return rows;
 }
