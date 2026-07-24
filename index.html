@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.9</div>
+  <div class="sub">OFICA Representaciones · v3.0</div>
 </div>
 
 <div class="wrap">
@@ -255,24 +255,54 @@ function guardarComercioDeFila(f){
 }
 
 /* ---------- Tasa de cambio del BCV (base de datos local, diaria) ---------- */
-// Mismo método que la app de cobranza: dolarapi (campo 'promedio' = tasa oficial BCV, con CORS).
-// Se guarda en localStorage por fecha; se alimenta automáticamente cada día que se abre la app.
+// La tasa se guarda por FECHA en localStorage ('tasasBCV'). Para cada factura se usa la
+// tasa BCV del DÍA de la factura (no la de hoy). Fuentes con CORS:
+//   • Hoy:        ve.dolarapi.com  (campo 'promedio')
+//   • Histórica:  pydolarve.org    (tasa oficial del BCV para una fecha dada)
 const TASA_API='https://ve.dolarapi.com/v1/dolares/oficial';
+const TASA_HIST='https://pydolarve.org/api/v2/tipo-cambio';
 const pad2=n=>String(n).padStart(2,'0');
 const hoyIso=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 let TASAS_BCV=(()=>{ try{ return JSON.parse(localStorage.getItem('tasasBCV')||'{}'); }catch(e){ return {}; } })();
 function guardarTasasBCV(){ try{ localStorage.setItem('tasasBCV', JSON.stringify(TASAS_BCV)); }catch(e){} }
+// Extrae el valor de la tasa de una respuesta JSON (tolerante a distintos formatos de API).
+function leerTasaJson(j){
+  if(!j||typeof j!=='object') return null;
+  const cand=[j.promedio,j.price,j.tipo_cambio,j.tasa,j.valor,
+             j.monitors&&j.monitors.usd&&(j.monitors.usd.price||j.monitors.usd.promedio),
+             j.usd&&(j.usd.promedio||j.usd.price)];
+  for(const c of cand){ const v=Number(c); if(v>0) return v; }
+  return null;
+}
 async function actualizarTasaHoy(){
   const iso=hoyIso();
   if(TASAS_BCV[iso]!=null) return TASAS_BCV[iso];   // ya la tenemos guardada hoy
   try{
     const r=await fetch(TASA_API+'?t='+Date.now(),{cache:'no-store'});
     if(!r.ok) throw 0;
-    const j=await r.json();
-    const usd=Number(j.promedio);
+    const usd=leerTasaJson(await r.json());
     if(usd>0){ TASAS_BCV[iso]=usd; guardarTasasBCV(); return usd; }
   }catch(e){ /* sin internet o API caída: se usa lo que haya guardado */ }
   return TASAS_BCV[iso]!=null?TASAS_BCV[iso]:null;
+}
+// Trae la tasa oficial del BCV para una fecha concreta (histórica) y la guarda en la tabla.
+const _tasasIntentadas=new Set();   // fechas ya intentadas en esta sesión (evita repetir la red)
+async function asegurarTasaFecha(iso){
+  if(!iso) return null;
+  if(TASAS_BCV[iso]!=null) return TASAS_BCV[iso];       // ya está en la tabla
+  if(iso===hoyIso()) return await actualizarTasaHoy();  // hoy: usa la fuente del día
+  if(_tasasIntentadas.has(iso)) return null;
+  _tasasIntentadas.add(iso);
+  const [y,mo,d]=iso.split('-');
+  const fecha=d+'-'+mo+'-'+y;                            // pydolarve usa DD-MM-YYYY
+  try{
+    const r=await fetch(TASA_HIST+'?fecha='+fecha+'&moneda=usd&t='+Date.now(),{cache:'no-store'});
+    if(r.ok){
+      const v=leerTasaJson(await r.json());
+      if(v>0){ TASAS_BCV[iso]=v; guardarTasasBCV(); return v; }
+    }
+  }catch(e){ /* histórico no disponible: se usará la tasa más cercana guardada */ }
+  return null;
 }
 function isoDeFecha(fh){
   const m=(fh||'').match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
@@ -280,12 +310,20 @@ function isoDeFecha(fh){
   let d=m[1], mo=m[2], y=m[3]; if(y.length===2) y='20'+y;
   return y+'-'+pad2(mo)+'-'+pad2(d);
 }
-// Tasa para la fecha de la factura; si no la hay, la más reciente guardada.
+// Tasa para la fecha de la factura. Prioridad:
+//   1) la tasa exacta de esa fecha,
+//   2) la última tasa publicada EN O ANTES de esa fecha (la vigente ese día),
+//   3) si la factura es anterior a todo lo guardado, la más antigua disponible.
 function tasaParaFecha(fh){
   const iso=isoDeFecha(fh);
   if(iso && TASAS_BCV[iso]!=null) return TASAS_BCV[iso];
   const ks=Object.keys(TASAS_BCV).sort();
-  return ks.length? TASAS_BCV[ks[ks.length-1]] : null;
+  if(!ks.length) return null;
+  if(iso){
+    let prev=null; for(const k of ks){ if(k<=iso) prev=k; else break; }
+    return prev!=null ? TASAS_BCV[prev] : TASAS_BCV[ks[0]];
+  }
+  return TASAS_BCV[ks[ks.length-1]];   // sin fecha legible: la más reciente
 }
 
 /* ---------- Utilidades de números (formato venezolano) ---------- */
@@ -622,6 +660,21 @@ function pintarFormularios(){
           }
         }
         const set=(kk,v)=>{const el=card.querySelector('input[data-k="'+kk+'"]'); if(el) el.value=fmt(v);};
+        // Al corregir la FECHA, recalcular la tasa BCV de esa fecha desde la tabla (y traer la histórica).
+        if(k==='fecha_hora'){
+          const t=tasaParaFecha(f.fecha_hora);
+          if(t!=null){ f.tasa_cambio=t; set('tasa_cambio',numVE(t)); }
+          const isoF=isoDeFecha(f.fecha_hora);
+          if(isoF && TASAS_BCV[isoF]==null){
+            asegurarTasaFecha(isoF).then(v=>{
+              if(v>0 && filas[i]===f){
+                f.tasa_cambio=v; set('tasa_cambio',v);
+                const bs2=baseDe(f);
+                set('base_usd',enUsd(bs2,f)); set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
+              }
+            });
+          }
+        }
         const bs=baseDe(f);
         set('base',bs); set('base_usd',enUsd(bs,f));
         set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
@@ -679,6 +732,7 @@ async function procesar(files){
       d.direccion_fiscal='';
       const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
       if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
+      await asegurarTasaFecha(isoDeFecha(d.fecha_hora)); // trae la tasa BCV histórica de esa fecha
       d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV para la fecha de la factura
       if(facturaDuplicada(d)) d.duplicada=true;        // ¿ya está entre las facturas procesadas?
       filas.push({archivo:f.name, texto:text, ...d});
