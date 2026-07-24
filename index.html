@@ -66,7 +66,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.2</div>
+  <div class="sub">OFICA Representaciones · v1.3</div>
 </div>
 
 <div class="wrap">
@@ -144,6 +144,19 @@ const fmt=n=> n==null||isNaN(n) ? '' : n.toFixed(2);
 /* ---------- Parseo de la factura ---------- */
 function limpiaComercio(s){ return s.replace(/^[^A-Za-zÁÉÍÓÚÑ0-9]*/,'').replace(/^[a-z]\s+/,'').replace(/[.,]\s*$/,'').trim(); }
 
+// Normaliza una cédula/RIF: debe empezar por V, E, J, G o P. Corrige confusiones del OCR.
+function normalizaRif(s){
+  if(!s) return s;
+  s=s.toUpperCase().replace(/[\s.\-]/g,'');
+  const m=s.match(/^([A-Z]?)(\d{5,10})/);
+  if(!m) return s;
+  let letra=m[1];
+  const validas=['V','E','J','G','P'];
+  const conf={U:'V',Y:'V',W:'V',N:'V','0':'',I:'',L:'',T:''};  // OCR suele confundir la V con U/Y/W
+  if(!validas.includes(letra)) letra = conf[letra] || 'V';  // por defecto V (persona natural)
+  return letra + m[2];
+}
+
 // Mayor monto de la factura (el total suele ser el más grande) — robusto ante OCR ruidoso.
 function bestMonto(t){
   const re=/(\d[\d.\s]{0,12}?,\s?\d{2})/g; let m, mx=null;
@@ -174,7 +187,7 @@ function parseFactura(text){
 
   // Cédula o RIF del cliente: línea 'RIF/C.I.' (tolerante a 'C.1.', 'C.T.', etc.)
   const lc=lines.find(l=>/RIF\s*[\/|]?\s*C\s*[.\s]*[I1lLTt]/i.test(l));
-  if(lc){ const m=lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=m[1].toUpperCase().replace(/[\s-]/g,''); }
+  if(lc){ const m=lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=normalizaRif(m[1]); }
 
   // Nombre / Razón social del cliente (puede quedar en otra línea por el OCR)
   const ir=lines.findIndex(l=>/RAZ[OÓ0]N\s+SOCIAL/i.test(l));
