@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.4</div>
+  <div class="sub">OFICA Representaciones · v3.5</div>
 </div>
 
 <div class="wrap">
@@ -411,14 +411,17 @@ function parseFactura(text){
   }
   if(com) d.comercio=limpiaComercio(com);
 
-  // Cédula o RIF del cliente: línea 'RIF/C.I.' (tolerante a 'C.1.', 'C.T.', etc.)
-  const lc=lines.find(l=>/RIF\s*[\/|]?\s*C\s*[.\s]*[I1lLTt]/i.test(l));
-  if(lc){ const m=lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=normalizaRif(m[1]); }
+  // Cédula o RIF del cliente: línea 'RIF/C.I.' (tolerante a 'C.1.', 'C.T.', 'RTF', etc.).
+  // También vale una línea con 'C.I' aunque el OCR dañe 'RIF'. Se prefiere un número con
+  // prefijo V/E/J/G/P (el del cliente), no el del comercio.
+  const lc=lines.find(l=>/RIF\s*[\/|]?\s*C\s*[.,\s]*[I1lLTt]/i.test(l) || /\bC\s*[.,\s]*[I1lLTt]\s*[.,\s]*[:._-]/i.test(l));
+  if(lc){ const m=lc.match(/([VEJGP]\s*-?\s*\d{6,10})/i) || lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=normalizaRif(m[1].replace(/\s/g,'')); }
 
-  // Nombre / Razón social del cliente (puede quedar en otra línea por el OCR)
-  const ir=lines.findIndex(l=>/RAZ[OÓ0]N\s+SOCIAL/i.test(l));
+  // Nombre / Razón social del cliente. Se busca por 'SOCIAL' (más fiable que 'RAZON', que el
+  // OCR suele leer como 'KAZON'). El nombre puede quedar en la misma línea o en la siguiente.
+  const ir=lines.findIndex(l=>/S[O0]CIAL\s*[:\-]/i.test(l) || /[RK]AZ[OÓ0]N\s+S[O0]CIAL/i.test(l));
   if(ir>=0){
-    let rem=lines[ir].replace(/.*RAZ[OÓ0]N\s+SOCIAL\s*[:\-]?\s*/i,'').trim();
+    let rem=lines[ir].replace(/.*S[O0]CIAL\s*[:\-]?\s*/i,'').trim();
     const palabras=rem.split(/\s+/).filter(w=>/[A-Za-zÁÉÍÓÚÑ]{2,}/.test(w));
     if(palabras.length>=2){ d.nombre_razon_social=rem; }
     else{
@@ -447,7 +450,7 @@ function parseFactura(text){
     const sin=l.replace(/[\d.,]+\s*%/g,' ');            // quita porcentajes (16,00%)
     return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
   };
-  const esResumen=l=> (/\bTOTAL\b/i.test(l) && !/SUB\s*[- ]?\s*TOTAL/i.test(l)) || /EXENT[OA]/i.test(l) || /A\s+PAGAR/i.test(l);
+  const esResumen=l=> (/\bTOTAL\b/i.test(l) && !/SUB\s*[- ]?\s*TOTAL/i.test(l)) || /E[XKNM]ENT[O0A]/i.test(l) || /A\s+PAGAR/i.test(l);
   let totResumen=null;
   for(const l of lines){
     if(!esResumen(l)) continue;
@@ -473,7 +476,8 @@ function parseFactura(text){
   //   • Exento < Total  → parcial → IVA = Total − Exento  (Base = Total − IVA = Exento).
   //   Ambas se resumen en: IVA = Total − Exento (nunca negativo).
   let exe=null;
-  const lineaEx=lines.find(l=>/EXENT[OA]/i.test(l));
+  const reExento=/E[XKNM]ENT[O0A]/i;   // EXENTO tolerante a fallos del OCR (EKENTO, ENENTO, EXENT0…)
+  const lineaEx=lines.find(l=>reExento.test(l));
   if(lineaEx){
     const msEx=montosLinea(lineaEx);
     if(msEx.length) exe=Math.max(...msEx);               // monto exento leído en esa línea
