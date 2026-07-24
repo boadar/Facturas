@@ -90,7 +90,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.7</div>
+  <div class="sub">OFICA Representaciones · v1.8</div>
 </div>
 
 <div class="wrap">
@@ -158,7 +158,12 @@ function numVE(s){
 const fmt=n=> n==null||isNaN(n) ? '' : n.toFixed(2);
 
 /* ---------- Parseo de la factura ---------- */
-function limpiaComercio(s){ return s.replace(/^[^A-Za-zÁÉÍÓÚÑ0-9]*/,'').replace(/^[a-z]\s+/,'').replace(/[.,]\s*$/,'').trim(); }
+function limpiaComercio(s){
+  return s.replace(/^[^A-Za-zÁÉÍÓÚÑ0-9]*/,'')   // basura inicial no alfanumérica
+          .replace(/^[A-Za-zÑ]\s+/,'')            // letra suelta inicial (logo ® leído como 'A'/'q')
+          .replace(/[.\s,]+$/,'')                 // puntuación/espacios finales
+          .trim();
+}
 
 // Normaliza una cédula/RIF: debe empezar por V, E, J, G o P. Corrige confusiones del OCR.
 function normalizaRif(s){
@@ -187,25 +192,29 @@ function parseFactura(text){
   const lines=t.split('\n').map(l=>l.trim()).filter(Boolean);
   const d={comercio:'',rif_comercio:'',cedula_rif:'',nombre_razon_social:'',fecha_hora:'',numero_factura:'',iva:null,monto_total:null};
 
-  // RIF del comercio/emisor: línea cerca del inicio 'RIF <letra><dígitos>' (NO 'RIF/C.I.' del cliente).
-  // El OCR puede leer la letra J/G como dígito o con separadores raros; se tolera y normaliza.
+  // RIF del comercio/emisor: línea cerca del inicio con 'RIF' (NO 'RIF/C.I.' del cliente).
+  // El OCR a veces pierde la letra J (lee 'RIF 0020200') o la lee como dígito ('3-000...').
+  // Se acepta letra o dígito-suelto como prefijo, o solo números, y se normaliza (por defecto J).
   let idx=-1;
   for(let i=0;i<Math.min(12,lines.length);i++){
     const l=lines[i];
     if(/RIF\s*[\/|]/i.test(l) || /C\.?\s*[I1L]\.?/i.test(l)) continue;   // salta la línea del cliente
-    const m=l.match(/RIF[\s.:=~]*([JGVEP0-9])[\s.=~\-]*?(\d[\d.\s\-]{6,})/i);
+    if(!/RIF/i.test(l)) continue;
+    const rest=l.replace(/^.*?RIF[\s.:=~]+/i,'').trim();
+    const m=rest.match(/^([A-Z0-9])[\s.=~\-]+(\d[\d.\s\-]{4,})/i)         // prefijo (letra o dígito) + sep + números
+          || rest.match(/^()(\d[\d.\s\-]{5,})/);                          // solo números
     if(m){
-      let letra=m[1].toUpperCase(), dig=m[2].replace(/[^\d]/g,'');
-      if(/[0-9]/.test(letra) || !'JGVEP'.includes(letra)) letra='J';   // RIF de empresa suele ser J
-      d.rif_comercio=letra+'-'+dig;
-      idx=i; break;
+      let letra=(m[1]||'').toUpperCase(), dig=m[2].replace(/[^\d]/g,'');
+      if(!letra || !'JGVEP'.includes(letra)) letra='J';                  // RIF de empresa suele ser J
+      if(dig.length>=5){ d.rif_comercio=letra+'-'+dig; idx=i; break; }
     }
   }
 
   // Nombre del comercio: preferimos una línea con sufijo de empresa (C.A., S.A., S.R.L., etc.)
   // cerca del inicio; si no, la línea siguiente al RIF del comercio.
   const esComercio=l=> /[A-Za-zÑ]{3}/.test(l) && !/^RIF/i.test(l) && !/SENIAT/i.test(l) && !/RAZ[OÓ0]N/i.test(l);
-  const suf=/(C\.?\s?A\.?|S\.?\s?A\.?|S\.?\s?R\.?\s?L\.?|COMPA[NÑ]|,?\s?C\.?A\b)/i;
+  // Requiere el punto (C.A., S.A., S.R.L.) para no confundirse con 'ca' dentro de una palabra
+  const suf=/(?:^|[\s,])(C\.\s?A\.?|S\.\s?A\.?|S\.\s?R\.\s?L\.?|COMPA[NÑ][IÍ]A)/i;
   let com=lines.slice(0,8).find(l=>esComercio(l) && suf.test(l));
   if(!com && idx>=0){
     for(let i=idx+1;i<Math.min(idx+3,lines.length);i++){ if(esComercio(lines[i])){ com=lines[i]; break; } }
@@ -240,20 +249,29 @@ function parseFactura(text){
   const mNf=t.match(/FACTURA\s*[:\-]?\s*(\d{4,})/i);
   if(mNf) d.numero_factura=mNf[1];
 
-  // IVA: en la línea de impuestos (BI ... IVA ...). El OCR suele leer 'IVA' como 'JUA'/'1VA'
-  // y 'G16%' como '616%'. Estrategia: ubicar esa línea, quitar los porcentajes y tomar el
-  // último monto (el IVA va después de la base imponible).
+  // Total: primero 'TOTAL … Bs'; si falla, el mayor monto de la factura
+  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*[.,]\d{2})/i);
+  d.monto_total = (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
+
+  // IVA: en la línea de impuestos (BI ... IVA ...). El OCR a menudo daña el monto del IVA
+  // (p.ej. lee 'Bs 3.027,21' como 'Bs 027,21'). Truco robusto: la base imponible (el mayor
+  // monto de esa línea) sí se lee bien, así que IVA = Total − Base imponible.
   const montosLinea=l=>{
     const sin=l.replace(/[\d.,]+\s*%/g,' ');            // quita porcentajes (16,00%)
     return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
   };
-  let lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
+  const lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
              || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
-  if(lineaImp){ const ms=montosLinea(lineaImp); if(ms.length) d.iva=ms[ms.length-1]; }
-
-  // Total: primero 'TOTAL … Bs'; si falla, el mayor monto de la factura
-  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*[.,]\d{2})/i);
-  d.monto_total = (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
+  if(lineaImp){
+    const ms=montosLinea(lineaImp);
+    if(ms.length){
+      const bi=Math.max(...ms);                          // base imponible = mayor monto de la línea
+      if(d.monto_total!=null && bi>0 && bi<d.monto_total)
+        d.iva=Math.round((d.monto_total-bi)*100)/100;    // IVA = Total − Base imponible (robusto)
+      else
+        d.iva=ms[ms.length-1];                           // fallback: último monto de la línea
+    }
+  }
 
   return d;
 }
