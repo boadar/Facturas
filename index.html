@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.0</div>
+  <div class="sub">OFICA Representaciones · v3.1</div>
 </div>
 
 <div class="wrap">
@@ -145,6 +145,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
       Ver facturas procesadas (<span id="cntGuardadas">0</span>)
     </button>
     <div class="hint">Todo el procesamiento ocurre en tu dispositivo (OCR local). No se envía nada a ningún servidor.<br>Los datos se pueden corregir antes de exportar.</div>
+    <div style="text-align:center;margin-top:14px"><button class="link" data-tasas>⤓ Descargar tabla de tasas BCV (Excel)</button></div>
   </div>
 
   <!-- Progreso -->
@@ -178,6 +179,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
       <button class="btn btn-ghost" id="btnCsv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>CSV</button>
     </div>
     <p class="rphint">Facturas guardadas en este dispositivo. Puedes <b>editar</b> o <b>eliminar</b> cualquiera, o descargarlas a Excel/CSV.</p>
+    <div style="margin:-6px 0 14px"><button class="link" data-tasas>⤓ Descargar tabla de tasas BCV (Excel)</button></div>
     <div class="rpbar">
       <label class="rpsel"><input type="checkbox" id="selTodas"> Seleccionar todas</label>
       <button class="rpdel" id="btnElimSel" disabled>Eliminar</button>
@@ -841,6 +843,24 @@ $('btnCsv').onclick=()=>{
   const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='facturas.csv'; a.click();
 };
+
+// Exporta a Excel toda la tabla de tasas BCV guardadas (una fila por fecha).
+function matrizTasas(){
+  const rows=[['Fecha','Tasa BCV (Bs/$)']];
+  Object.keys(TASAS_BCV).sort().forEach(iso=>{
+    const [y,m,d]=iso.split('-');
+    rows.push([d+'-'+m+'-'+y, fmt(numVE(TASAS_BCV[iso]))]);
+  });
+  return rows;
+}
+function exportarTasas(){
+  const n=Object.keys(TASAS_BCV).length;
+  if(!n){ alert('Aún no hay tasas de cambio guardadas. Se guardan al procesar facturas o al abrir la app con internet.'); return; }
+  const ws=XLSX.utils.aoa_to_sheet(matrizTasas());
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Tasas BCV');
+  XLSX.writeFile(wb,'tasas_bcv.xlsx');
+}
+document.querySelectorAll('[data-tasas]').forEach(b=>b.addEventListener('click',exportarTasas));
 
 /* ---------- Guardar lote y navegación ---------- */
 $('btnGuardar').addEventListener('click',()=>{
