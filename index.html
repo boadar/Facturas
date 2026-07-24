@@ -75,15 +75,13 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .fgrid.tres{grid-template-columns:1fr 1fr 1fr}
 @media(max-width:520px){.fgrid,.fgrid.tres{grid-template-columns:1fr}}
 .fld{display:flex;flex-direction:column;min-width:0}
-.fld label{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px}
-.fld input{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;background:#f7f9fb;color:var(--txt);transition:border-color .12s,box-shadow .12s}
+.fld label{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px;text-align:center}
+.fld input{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;background:#f7f9fb;color:var(--txt);text-align:center;transition:border-color .12s,box-shadow .12s}
 .fld input::placeholder{color:#aeb8c2}
 .fld input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,157,220,.18);background:#fff}
 .fld input.ro{background:#eef4f8;color:var(--mut);font-weight:600}
-.fld .num{text-align:right;font-variant-numeric:tabular-nums}
+.fld .num{font-variant-numeric:tabular-nums}
 .fgrid .full{grid-column:1/-1}
-.fld.c label{text-align:center}
-.fld.c input{text-align:center}
 .recon{display:inline-block;font-size:10px;font-weight:700;color:var(--ok);background:#e1f5ee;border-radius:6px;padding:2px 7px;margin-left:8px;vertical-align:middle}
 .flinks{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
 .link{color:var(--acc);background:none;border:none;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;padding:0}
@@ -94,7 +92,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.3</div>
+  <div class="sub">OFICA Representaciones · v2.4</div>
 </div>
 
 <div class="wrap">
@@ -474,9 +472,9 @@ function pintarFormularios(){
         campo(i,'direccion_fiscal','Dirección fiscal del comercio',f.direccion_fiscal,'Dirección del comercio',{full:true})+
       `</div>`+
       `<div class="fgrid tres">`+
-        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA')+
-        campo(i,'tasa_cambio','Tasa BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true})+
-        campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000')+
+        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA',{center:true})+
+        campo(i,'tasa_cambio','Tasa BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true,center:true})+
+        campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000',{center:true})+
       `</div>`+
       `<div class="fsection">Montos</div>`+
       `<div class="fgrid tres">`+
