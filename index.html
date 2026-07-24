@@ -88,6 +88,11 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .textobox{display:none;margin-top:10px;background:#f7f9fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#334}
 .copiado{color:var(--ok);font-size:12px;font-weight:600;align-self:center}
 /* Reporte de facturas guardadas (estilo cobranza) */
+.rphead{display:flex;align-items:center;gap:12px;margin:0 0 14px}
+.homebtn{background:#fff;border:1px solid var(--line);border-radius:10px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;color:var(--ofica)}
+.homebtn:active{transform:scale(.96)}
+.homebtn svg{width:24px;height:24px}
+.rptitle{flex:1;text-align:center;font-size:18px;font-weight:700;letter-spacing:.5px;color:var(--txt)}
 .rphint{color:var(--mut);font-size:13px;margin:0 0 14px;line-height:1.5}
 .rpbar{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;padding:0 2px}
 .rpsel{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--txt);cursor:pointer;user-select:none}
@@ -115,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.5</div>
+  <div class="sub">OFICA Representaciones · v2.6</div>
 </div>
 
 <div class="wrap">
@@ -137,7 +142,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
     </label>
     <button class="btn btn-ghost" id="btnVerGuardadas" style="margin-top:12px;display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      Ver facturas guardadas (<span id="cntGuardadas">0</span>)
+      Ver facturas procesadas (<span id="cntGuardadas">0</span>)
     </button>
     <div class="hint">Todo el procesamiento ocurre en tu dispositivo (OCR local). No se envía nada a ningún servidor.<br>Los datos se pueden corregir antes de exportar.</div>
   </div>
@@ -162,6 +167,11 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 
   <!-- Reporte de facturas guardadas -->
   <div id="scReport" style="display:none">
+    <div class="rphead">
+      <button class="homebtn" id="btnHome" title="Ir al inicio" aria-label="Ir al inicio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg></button>
+      <div class="rptitle">FACTURAS PROCESADAS</div>
+      <span style="width:44px;flex:0 0 auto"></span>
+    </div>
     <div class="toolbar">
       <label class="btn btn-acc" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Nuevas facturas</label>
       <button class="btn btn-ok" id="btnXlsx"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Excel</button>
@@ -476,13 +486,30 @@ function persistirGuardadas(){ try{ localStorage.setItem('facturasGuardadas', JS
 function nuevoId(){ return 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 // Fecha/hora legible del momento en que se guardó (ej. 24/7/2026 15:30)
 function fmtGuardado(ms){ const d=new Date(ms); return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
-// Guarda (o actualiza) el lote actual en la base de datos de facturas guardadas.
+// Clave para identificar una factura de forma única: RIF del comercio + Nº de factura.
+// Sin número de factura no se puede afirmar que sea duplicada.
+function claveFactura(f){
+  const nf=(f.numero_factura||'').replace(/\D/g,'');
+  if(!nf) return null;
+  const rif=(f.rif_comercio||'').replace(/\D/g,'');
+  return rif+'|'+nf;
+}
+// ¿Ya existe esta factura entre las guardadas? (excluye la propia por id al editar)
+function facturaDuplicada(f, excluirId){
+  const k=claveFactura(f); if(!k) return null;
+  return GUARDADAS.find(g=>g.id!==excluirId && claveFactura(g)===k) || null;
+}
+// Guarda (o actualiza) el lote actual. Devuelve las facturas que NO se guardaron por ser duplicadas.
 function guardarLoteActual(){
+  const dups=[];
   filas.forEach(f=>{
+    const dup=facturaDuplicada(f, f.id);
+    if(dup){ dups.push(f); return; }        // ya existe: no se guarda (evita duplicados)
     if(f.id){ const i=GUARDADAS.findIndex(g=>g.id===f.id); if(i>=0){ GUARDADAS[i]={...f, guardadoEn:GUARDADAS[i].guardadoEn||Date.now()}; return; } }
     f.id=nuevoId(); GUARDADAS.unshift({...f, guardadoEn:Date.now()});
   });
   persistirGuardadas();
+  return dups;
 }
 
 function baseDe(f){
@@ -517,6 +544,7 @@ function pintarFormularios(){
         `<div class="ftitle">Factura ${i+1}</div>`+
         `<div class="fsub">${esc(f.archivo)}</div>`+
       `</div><button class="fx" title="Eliminar" data-del="${i}">✕</button></div>`+
+      (f.duplicada?`<div class="warn-box">⚠ Esta factura (Nº ${esc(f.numero_factura||'—')}) ya fue procesada. No se guardará para evitar duplicados.</div>`:'')+
       `<div class="fsection">Información general${f.reconocido?'<span class="recon">✓ comercio reconocido</span>':''}</div>`+
       `<div class="fgrid">`+
         campo(i,'nombre_razon_social','Nombre o Razón Social',f.nombre_razon_social,'Nombre del cliente')+
@@ -612,6 +640,7 @@ async function procesar(files){
       const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
       if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
       d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV para la fecha de la factura
+      if(facturaDuplicada(d)) d.duplicada=true;        // ¿ya está entre las facturas procesadas?
       filas.push({archivo:f.name, texto:text, ...d});
     }catch(e){
       console.error(e);
@@ -722,10 +751,18 @@ $('btnCsv').onclick=()=>{
 /* ---------- Guardar lote y navegación ---------- */
 $('btnGuardar').addEventListener('click',()=>{
   if(!filas.length) return;
-  guardarLoteActual();
+  const dups=guardarLoteActual();
+  if(dups.length){
+    const lista=dups.map(f=>'•  Nº '+(f.numero_factura||'—')+'  —  '+(f.comercio||'comercio')).join('\n');
+    alert((dups.length===1
+        ? 'Esta factura ya fue procesada anteriormente y no se guardó para evitar duplicados:'
+        : 'Estas facturas ya fueron procesadas anteriormente y no se guardaron para evitar duplicados:')
+      +'\n\n'+lista);
+  }
   filas=[];
   mostrar('scReport');
 });
+$('btnHome').addEventListener('click',()=>mostrar('scStart'));
 $('btnVerGuardadas').addEventListener('click',()=>mostrar('scReport'));
 $('selTodas').addEventListener('change',e=>{
   document.querySelectorAll('#lista-reporte .chk').forEach(c=>{ c.checked=e.target.checked; });
