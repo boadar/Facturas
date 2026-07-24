@@ -2,101 +2,150 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Procesador de facturas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#282828">
+  <title>Procesador de Facturas</title>
   <style>
-    :root { --azul: #2563eb; --gris: #64748b; --borde: #e2e8f0; --fondo: #f8fafc; }
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-           margin: 0; background: var(--fondo); color: #0f172a; }
-    header { background: #fff; border-bottom: 1px solid var(--borde); padding: 1.25rem 1.5rem; }
-    header h1 { margin: 0; font-size: 1.25rem; }
-    header p { margin: .25rem 0 0; color: var(--gris); font-size: .9rem; }
-    main { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem; }
-    .card { background: #fff; border: 1px solid var(--borde); border-radius: 12px;
-            padding: 1.5rem; margin-bottom: 1.5rem; }
-    .drop { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 2rem; text-align: center;
-            color: var(--gris); cursor: pointer; transition: .15s; }
-    .drop:hover, .drop.hover { border-color: var(--azul); background: #eff6ff; color: var(--azul); }
-    .drop input { display: none; }
-    .lista { margin: .75rem 0 0; font-size: .85rem; color: var(--gris); text-align: left; }
-    button { background: var(--azul); color: #fff; border: 0; border-radius: 8px;
-             padding: .7rem 1.4rem; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--borde); white-space: nowrap; }
-    th { background: var(--fondo); color: var(--gris); font-weight: 600; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
-    .scroll { overflow-x: auto; }
-    .descargas a { display: inline-block; margin-right: .75rem; color: var(--azul); text-decoration: none;
-                   border: 1px solid var(--azul); border-radius: 8px; padding: .5rem .9rem; }
-    .error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
-             border-radius: 8px; padding: .75rem 1rem; margin-bottom: 1rem; font-size: .9rem; }
-    .spinner { display: none; margin-top: 1rem; color: var(--gris); }
-    h2 { font-size: 1.05rem; }
+    :root{--ofica:#282828;--acc:#009DDC;--ok:#1d9e75;--bg:#eef1f4;--card:#fff;--line:#e2e6ea;--txt:#282828;--mut:#6b7280;--danger:#c0392b}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:16px;line-height:1.4}
+    .hdr{background:var(--ofica);color:#fff;padding:calc(env(safe-area-inset-top) + 14px) 16px 14px;text-align:center;position:sticky;top:0;z-index:10}
+    .hdr h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.2px}
+    .hdr .sub{font-size:12px;opacity:.7;margin-top:2px}
+    .wrap{max-width:640px;margin:0 auto;padding:16px}
+    .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:none;border-radius:12px;padding:16px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none}
+    .btn-primary{background:var(--ofica);color:#fff}
+    .btn-acc{background:var(--acc);color:#fff}
+    .btn-ghost{background:#fff;color:var(--ofica);border:1px solid var(--line)}
+    .btn:active{transform:scale(.98)}
+    .btn[disabled]{opacity:.5}
+    .btn svg{width:22px;height:22px;flex:0 0 auto}
+    .hero{text-align:center;padding:26px 0 8px}
+    .hero .circ{width:96px;height:96px;border-radius:50%;background:#e6f4fb;display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+    .hero .circ svg{width:46px;height:46px;stroke:var(--acc)}
+    .hero p{color:var(--mut);font-size:15px;margin:0 auto 22px;max-width:340px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+    .drop{border:2px dashed #cbd5e1;border-radius:12px;padding:22px 16px;text-align:center;color:var(--mut);cursor:pointer;transition:.15s;display:block}
+    .drop:active,.drop.hover{border-color:var(--acc);background:#e6f4fb;color:#0c6a97}
+    .drop .t{font-weight:600;color:var(--txt)}
+    .drop .d{font-size:12px;margin-top:4px}
+    .drop input{display:none}
+    .lista{margin:10px 0 0;font-size:13px;color:var(--mut);text-align:left}
+    .lista .cod{font-family:monospace;font-size:12px}
+    .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:14px;line-height:1.5}
+    .sheet-title{font-weight:600;text-align:center;margin:2px 0 14px}
+    .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;border-radius:8px;font-weight:600}
+    .badge-ok{background:#e1f5ee;color:var(--ok)}
+    .warn-box{background:#faeeda;border:1px solid #f0d9a8;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#854f0b}
+    .warn-box ul{margin:.4rem 0 0;padding-left:1.1rem}
+    .toolbar{display:flex;gap:10px;margin:0 0 14px}
+    .toolbar .btn{padding:12px}
+    .ftbl-wrap{border:1px solid var(--line);border-radius:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    table.ftbl{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+    table.ftbl th{background:#f4f6f8;color:var(--mut);font-weight:600;font-size:11px;text-align:left;padding:7px 8px;position:sticky;top:0;border-bottom:1px solid var(--line)}
+    table.ftbl td{padding:7px 8px;border-bottom:1px solid var(--line)}
+    table.ftbl tr:last-child td{border-bottom:none}
+    table.ftbl .num{text-align:right;font-variant-numeric:tabular-nums}
+    table.ftbl .cod{font-family:monospace;color:var(--mut)}
+    .progress{display:none;text-align:center;padding:40px 0}
+    .spin{width:48px;height:48px;border:4px solid #dfe4e8;border-top-color:var(--acc);border-radius:50%;margin:0 auto 18px;animation:sp 1s linear infinite}
+    @keyframes sp{to{transform:rotate(360deg)}}
+    .progress .msg{color:var(--mut);font-size:14px}
   </style>
 </head>
 <body>
-  <header>
-    <h1>📄 Procesador de facturas</h1>
-    <p>Sube facturas en PDF o imagen y extrae los datos automáticamente.</p>
-  </header>
+  <div class="hdr">
+    <h1>Procesador de Facturas</h1>
+    <div class="sub">OFICA Representaciones</div>
+  </div>
 
-  <main>
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <div class="wrap">
+    {% if error %}
+    <div class="warn-box">{{ error }}</div>
+    {% endif %}
 
-    <div class="card">
-      <form id="form" action="/procesar" method="post" enctype="multipart/form-data">
+    <form id="form" action="/procesar" method="post" enctype="multipart/form-data">
+      {% if not resultados %}
+      <div class="hero">
+        <div class="circ">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg>
+        </div>
+        <p>Sube una o varias facturas (PDF o imagen) y extrae los datos automáticamente.</p>
+      </div>
+      {% endif %}
+
+      <div class="card">
         <label class="drop" id="drop">
-          <div><strong>Arrastra tus facturas aquí</strong> o haz clic para seleccionar</div>
-          <div style="font-size:.8rem;margin-top:.4rem">PDF, JPG, PNG, WEBP, GIF</div>
+          <div class="t">Arrastra tus facturas aquí</div>
+          <div class="d">o toca para seleccionar — PDF, JPG, PNG, WEBP, GIF</div>
           <input type="file" id="input" name="facturas" multiple
                  accept=".pdf,.png,.jpg,.jpeg,.webp,.gif">
           <div class="lista" id="lista"></div>
         </label>
-        <button type="submit" id="btn" disabled>Procesar facturas</button>
-        <div class="spinner" id="spinner">⏳ Procesando… esto puede tardar unos segundos por factura.</div>
-      </form>
-    </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="btn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Procesar facturas
+      </button>
+
+      <div class="progress" id="progress">
+        <div class="spin"></div>
+        <div class="msg">Procesando… puede tardar unos segundos por factura.</div>
+      </div>
+    </form>
+
+    {% if not resultados %}
+    <div class="hint">Los datos se extraen con IA y se pueden exportar a Excel y CSV.<br>Campos: comercio y RIF del emisor, cédula/RIF y nombre del cliente, fecha y hora, nº de factura, IVA, base y monto total.</div>
+    {% endif %}
 
     {% if errores %}
-    <div class="error">
+    <div class="warn-box" style="margin-top:14px">
       <strong>Algunas facturas no se procesaron:</strong>
-      <ul style="margin:.4rem 0 0">
-        {% for nombre, motivo in errores %}<li>{{ nombre }} — {{ motivo }}</li>{% endfor %}
-      </ul>
+      <ul>{% for nombre, motivo in errores %}<li>{{ nombre }} — {{ motivo }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
 
     {% if resultados %}
-    <div class="card">
-      <h2>Resultado ({{ resultados|length }} factura{{ 's' if resultados|length != 1 }})</h2>
+    <div style="margin-top:16px">
+      <div class="sheet-title">
+        <span class="badge badge-ok">✓ {{ resultados|length }} factura{{ 's' if resultados|length != 1 }} procesada{{ 's' if resultados|length != 1 }}</span>
+      </div>
+
       {% if token %}
-      <div class="descargas" style="margin-bottom:1rem">
-        <a href="/descargar/{{ token }}.xlsx">⬇ Descargar Excel</a>
-        <a href="/descargar/{{ token }}.csv">⬇ Descargar CSV</a>
+      <div class="toolbar">
+        <a class="btn btn-acc" href="/descargar/{{ token }}.xlsx">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Excel
+        </a>
+        <a class="btn btn-ghost" href="/descargar/{{ token }}.csv">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          CSV
+        </a>
       </div>
       {% endif %}
-      <div class="scroll">
-        <table>
+
+      <div class="ftbl-wrap">
+        <table class="ftbl">
           <thead>
             <tr>
               <th>Archivo</th><th>Comercio</th><th>RIF comercio</th>
               <th>Cédula o RIF</th><th>Nombre o Razón Social</th>
-              <th>Fecha y hora</th><th>Nº de factura</th>
-              <th class="num">Base</th><th class="num">IVA</th><th class="num">Monto total</th>
+              <th>Fecha y hora</th><th>Nº factura</th>
+              <th class="num">Base</th><th class="num">IVA</th><th class="num">Total</th>
             </tr>
           </thead>
           <tbody>
             {% for nombre, f in resultados %}
             <tr>
-              <td>{{ nombre }}</td>
+              <td class="cod">{{ nombre }}</td>
               <td>{{ f.comercio or '—' }}</td>
-              <td>{{ f.rif_comercio or '—' }}</td>
-              <td>{{ f.cedula_rif or '—' }}</td>
+              <td class="cod">{{ f.rif_comercio or '—' }}</td>
+              <td class="cod">{{ f.cedula_rif or '—' }}</td>
               <td>{{ f.nombre_razon_social or '—' }}</td>
               <td>{{ f.fecha_hora or '—' }}</td>
-              <td>{{ f.numero_factura or '—' }}</td>
+              <td class="cod">{{ f.numero_factura or '—' }}</td>
               <td class="num">{{ '%.2f'|format(f.base) if f.base is not none else '—' }}</td>
               <td class="num">{{ '%.2f'|format(f.iva) if f.iva is not none else '—' }}</td>
               <td class="num">{{ '%.2f'|format(f.monto_total) if f.monto_total is not none else '—' }}</td>
@@ -105,9 +154,16 @@
           </tbody>
         </table>
       </div>
+
+      <div class="toolbar" style="margin-top:14px">
+        <a class="btn btn-ghost" href="/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Procesar más
+        </a>
+      </div>
     </div>
     {% endif %}
-  </main>
+  </div>
 
   <script>
     const drop = document.getElementById('drop');
@@ -115,7 +171,7 @@
     const lista = document.getElementById('lista');
     const btn = document.getElementById('btn');
     const form = document.getElementById('form');
-    const spinner = document.getElementById('spinner');
+    const progress = document.getElementById('progress');
 
     function refrescar() {
       const files = [...input.files];
@@ -130,7 +186,11 @@
       drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hover'); }));
     drop.addEventListener('drop', e => { input.files = e.dataTransfer.files; refrescar(); });
 
-    form.addEventListener('submit', () => { btn.disabled = true; spinner.style.display = 'block'; });
+    form.addEventListener('submit', () => {
+      btn.disabled = true;
+      btn.style.display = 'none';
+      progress.style.display = 'block';
+    });
   </script>
 </body>
 </html>
