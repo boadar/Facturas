@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.2</div>
+  <div class="sub">OFICA Representaciones · v3.3</div>
 </div>
 
 <div class="wrap">
@@ -439,9 +439,23 @@ function parseFactura(text){
   const mNf=t.match(/FACTURA\s*[:\-]?\s*(\d{4,})/i);
   if(mNf) d.numero_factura=mNf[1];
 
-  // Total: primero 'TOTAL … Bs'; si falla, el mayor monto de la factura
+  // Total: el total real está en las líneas de RESUMEN (TOTAL / EXENTO / A PAGAR), normalmente
+  // repetido varias veces; ahí se lee mucho mejor que agarrando el mayor monto suelto (que podría
+  // ser un ítem). Se toma el MAYOR monto de esas líneas. Si no hay, 'TOTAL … Bs'; y por último,
+  // el mayor monto de toda la factura.
+  const montosDe=l=>{
+    const sin=l.replace(/[\d.,]+\s*%/g,' ');            // quita porcentajes (16,00%)
+    return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
+  };
+  const esResumen=l=> (/\bTOTAL\b/i.test(l) && !/SUB\s*[- ]?\s*TOTAL/i.test(l)) || /EXENT[OA]/i.test(l) || /A\s+PAGAR/i.test(l);
+  let totResumen=null;
+  for(const l of lines){
+    if(!esResumen(l)) continue;
+    const ms=montosDe(l);
+    if(ms.length){ const mx=Math.max(...ms); if(totResumen==null || mx>totResumen) totResumen=mx; }
+  }
   const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*[.,]\d{2})/i);
-  d.monto_total = (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
+  d.monto_total = totResumen ?? (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
 
   // IVA: en la línea de impuestos (BI ... IVA ...). El OCR a menudo daña el monto del IVA
   // (p.ej. lee 'Bs 3.027,21' como 'Bs 027,21'). Truco robusto: la base imponible (el mayor
@@ -451,19 +465,20 @@ function parseFactura(text){
     return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
   };
 
-  // Factura EXENTA de IVA: si aparece 'EXENTO/EXENTA' con un monto igual al total,
-  // toda la factura está exenta → base = total e IVA = 0.
+  const lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
+             || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
+
+  // Factura EXENTA de IVA: si aparece 'EXENTO/EXENTA', toda la factura está exenta → IVA = 0.
+  // Se confirma si el monto exento es igual al total, o si NO hay ninguna línea de impuesto (%).
   let exenta=false;
   const lineaEx=lines.find(l=>/EXENT[OA]/i.test(l));
   if(lineaEx){
     const msEx=montosLinea(lineaEx);
     if(d.monto_total==null && msEx.length) d.monto_total=Math.max(...msEx);
-    // "monto igual al total" (tolerancia mínima por redondeo del OCR)
-    if(d.monto_total!=null && msEx.some(v=>Math.abs(v-d.monto_total)<=0.5)) exenta=true;
+    if(d.monto_total!=null && msEx.some(v=>Math.abs(v-d.monto_total)<=0.5)) exenta=true; // monto exento = total
+    else if(!lineaImp) exenta=true;                                                       // no hay línea de IVA
   }
 
-  const lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
-             || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
   if(exenta){
     d.iva=0;                                             // exenta: IVA = 0 (base = total)
   }else if(lineaImp){
