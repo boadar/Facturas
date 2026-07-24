@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v4.0</div>
+  <div class="sub">OFICA Representaciones · v4.1</div>
 </div>
 
 <div class="wrap">
@@ -497,7 +497,7 @@ function parseFactura(text){
   }
   const mH=t.match(/HORA\s*[:\-]?\s*([\dOoIlL]{1,2}\s*[:.]\s*[\dOoIlL]{2})/i);
   const hora=mH? limpiaDig(mH[1]).replace(/\s+/g,'').replace('.',':') : null;
-  d.fecha_hora=[fecha, hora].filter(Boolean).join(' ');
+  d.fecha_hora = fecha || '';   // solo la fecha; si el OCR no la lee, queda vacía (se elige con el calendario)
 
   // Nº de factura. El OCR suele separarlo de 'FACTURA:' y dejarlo suelto (a veces junto a 'HORA:').
   // Estrategias en orden: 1) en la línea 'FACTURA:'; 2) línea sola pegada a 'HORA:'/'FECHA:';
@@ -696,12 +696,19 @@ function enUsd(vBs,f){
 function totalUsd(f){ return enUsd(numVE(f.monto_total), f); }
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// Convierte la fecha guardada ('DD-MM-AAAA') al formato del input de calendario ('AAAA-MM-DD').
+function fhToDateInput(fh){ return isoDeFecha(fh)||''; }
+
 // Crea un campo con etiqueta e input, enlazado a filas[i][clave]
 function campo(i,clave,etiqueta,val,ph,opts){
   opts=opts||{};
+  const fldCls='fld'+(opts.full?' full':'')+(opts.center?' c':'');
+  if(opts.date){   // campo de fecha con calendario nativo (se elige tocándolo)
+    return `<div class="${fldCls}"><label>${etiqueta}</label>`+
+      `<input type="date" class="fecha" data-i="${i}" data-k="${clave}" value="${esc(fhToDateInput(val))}"></div>`;
+  }
   const cls=(opts.num?'num ':'')+(opts.ro?'ro':'');
   const attrs=(opts.ro?'readonly ':'')+(opts.num?'inputmode="decimal" ':'');
-  const fldCls='fld'+(opts.full?' full':'')+(opts.center?' c':'');
   return `<div class="${fldCls}"><label>${etiqueta}</label>`+
     `<input class="${cls.trim()}" data-i="${i}" data-k="${clave}" ${attrs}value="${esc(val)}" placeholder="${esc(ph||'')}"></div>`;
 }
@@ -727,7 +734,7 @@ function pintarFormularios(){
         campo(i,'direccion_fiscal','Dirección fiscal del comercio',f.direccion_fiscal,'Dirección del comercio',{full:true})+
       `</div>`+
       `<div class="fgrid tres">`+
-        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA',{center:true})+
+        campo(i,'fecha_hora','Fecha',f.fecha_hora,'',{center:true,date:true})+
         campo(i,'tasa_cambio','Tasa BCV (Bs/$)',fmt(numVE(f.tasa_cambio)),'0,00',{num:true,center:true})+
         campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000',{center:true})+
       `</div>`+
@@ -754,9 +761,14 @@ function pintarFormularios(){
       `<pre class="textobox" data-texto>${esc(f.texto||'(sin texto)')}</pre>`;
     // Enlaces de edición
     card.querySelectorAll('input:not([readonly])').forEach(inp=>{
-      inp.addEventListener('input',()=>{
+      const manejar=()=>{
         const k=inp.dataset.k;
-        filas[i][k]=inp.value.trim();
+        if(inp.type==='date'){                          // calendario: 'AAAA-MM-DD' -> 'DD-MM-AAAA'
+          const v=inp.value;
+          filas[i][k]= v ? v.split('-').reverse().join('-') : '';
+        }else{
+          filas[i][k]=inp.value.trim();
+        }
         const f=filas[i];
         const setTxt=(kk,v)=>{ f[kk]=v==null?'':v; const el=card.querySelector('input[data-k="'+kk+'"]'); if(el && el!==inp) el.value=f[kk]; };
         const marcarRecon=texto=>{ const sec=card.querySelector('.fsection'); if(sec && !sec.innerHTML.includes(texto)) sec.insertAdjacentHTML('beforeend','<span class="recon">✓ '+texto+'</span>'); };
@@ -787,7 +799,9 @@ function pintarFormularios(){
         const bs=baseDe(f);
         set('base',bs); set('base_usd',enUsd(bs,f));
         set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
-      });
+      };
+      inp.addEventListener('input',manejar);
+      if(inp.type==='date') inp.addEventListener('change',manejar);   // el calendario emite 'change'
     });
     card.querySelector('[data-del]').addEventListener('click',()=>{ filas.splice(i,1); pintarFormularios(); });
     // Ver / ocultar texto leído
