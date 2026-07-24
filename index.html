@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.7</div>
+  <div class="sub">OFICA Representaciones · v2.8</div>
 </div>
 
 <div class="wrap">
@@ -229,6 +229,17 @@ function matchComercio(texto, rifParsed){
     }
   }
   return null;
+}
+
+// Busca un comercio en la base por su RIF (compara solo los dígitos, tolerante al OCR).
+function buscarComercioPorRif(rif){
+  const d=(rif||'').replace(/\D/g,''); if(d.length<6) return null;
+  return COMERCIOS.find(c=>{ const dc=(c.rif||'').replace(/\D/g,''); return dc.length>=6 && (dc===d || dc.includes(d) || d.includes(dc)); }) || null;
+}
+// Busca un comercio en la base por su nombre (núcleo, sin sufijo C.A./S.A.).
+function buscarComercioPorNombre(nombre){
+  const n=normTxt(nombre); if(n.length<4) return null;
+  return COMERCIOS.find(c=>{ const cn=normTxt(c.nombre).replace(/(SACA|CA|SA|SRL)$/,''); return cn.length>=4 && (n.includes(cn)||cn.includes(n)); }) || null;
 }
 
 // Guarda/actualiza un comercio en la base (para que se reconozca la próxima vez).
@@ -594,8 +605,23 @@ function pintarFormularios(){
     // Enlaces de edición
     card.querySelectorAll('input:not([readonly])').forEach(inp=>{
       inp.addEventListener('input',()=>{
-        filas[i][inp.dataset.k]=inp.value.trim();
-        const f=filas[i], set=(k,v)=>{const el=card.querySelector('input[data-k="'+k+'"]'); if(el) el.value=fmt(v);};
+        const k=inp.dataset.k;
+        filas[i][k]=inp.value.trim();
+        const f=filas[i];
+        // Al corregir/incluir el RIF (o el nombre) del comercio, buscar en la base y autocompletar.
+        if(k==='rif_comercio' || k==='comercio'){
+          const c = k==='rif_comercio' ? buscarComercioPorRif(f.rif_comercio) : buscarComercioPorNombre(f.comercio);
+          if(c){
+            const setTxt=(kk,v)=>{ f[kk]=v==null?'':v; const el=card.querySelector('input[data-k="'+kk+'"]'); if(el && el!==inp) el.value=f[kk]; };
+            setTxt('comercio', c.nombre);                    // actualiza COMERCIO
+            setTxt('direccion_fiscal', c.direccion||'');     // actualiza DIRECCIÓN FISCAL
+            if(k!=='rif_comercio') setTxt('rif_comercio', c.rif);  // si buscó por nombre, completa el RIF
+            f.reconocido=true;
+            const sec=card.querySelector('.fsection');
+            if(sec && !sec.querySelector('.recon')) sec.insertAdjacentHTML('beforeend','<span class="recon">✓ comercio reconocido</span>');
+          }
+        }
+        const set=(kk,v)=>{const el=card.querySelector('input[data-k="'+kk+'"]'); if(el) el.value=fmt(v);};
         const bs=baseDe(f);
         set('base',bs); set('base_usd',enUsd(bs,f));
         set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
