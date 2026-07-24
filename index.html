@@ -87,7 +87,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.5</div>
+  <div class="sub">OFICA Representaciones · v1.6</div>
 </div>
 
 <div class="wrap">
@@ -144,11 +144,12 @@ const COLS=['archivo','comercio','rif_comercio','cedula_rif','nombre_razon_socia
 /* ---------- Utilidades de números (formato venezolano) ---------- */
 function numVE(s){
   if(s==null) return null;
-  s=String(s).replace(/[^\d.,]/g,'');
+  s=String(s).replace(/[^\d.,]/g,'');   // deja solo dígitos, puntos y comas (quita espacios, 'Bs', etc.)
   if(!s) return null;
-  // '.' como separador de miles, ',' como decimal
-  if(s.includes(',')) s=s.replace(/\./g,'').replace(',','.');
-  const n=parseFloat(s);
+  // El último separador seguido de exactamente 2 dígitos es el decimal; el resto son miles.
+  const m=s.match(/^(.*)[.,](\d{2})$/);
+  if(m){ const ent=m[1].replace(/[.,]/g,''); const n=parseFloat(ent+'.'+m[2]); return isNaN(n)?null:n; }
+  const n=parseFloat(s.replace(/[.,]/g,''));
   return isNaN(n)?null:n;
 }
 const fmt=n=> n==null||isNaN(n) ? '' : n.toFixed(2);
@@ -171,8 +172,10 @@ function normalizaRif(s){
 
 // Mayor monto de la factura (el total suele ser el más grande) — robusto ante OCR ruidoso.
 function bestMonto(t){
-  const re=/(\d[\d.\s]{0,12}?,\s?\d{2})/g; let m, mx=null;
-  while((m=re.exec(t))){ const v=numVE(m[1]); if(v!=null && (mx==null || v>mx)) mx=v; }
+  // ignora porcentajes (16,00%) para no confundirlos con montos
+  const sin=t.replace(/[\d.,]+\s*%/g,' ');
+  const re=/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g; let m, mx=null;
+  while((m=re.exec(sin))){ const v=numVE(m[1]); if(v!=null && (mx==null || v>mx)) mx=v; }
   return mx;
 }
 
@@ -225,12 +228,19 @@ function parseFactura(text){
   const mNf=t.match(/FACTURA\s*[:\-]?\s*(\d{4,})/i);
   if(mNf) d.numero_factura=mNf[1];
 
-  // IVA (best-effort: monto tras 'IVA … Bs'); si el OCR lo destruye queda vacío (editable)
-  const mIva=t.match(/IVA[^\n]*?Bs?\.?\s*[^\d\n]{0,3}([\d][\d.\s]*,\s?\d{2})/i);
-  if(mIva) d.iva=numVE(mIva[1]);
+  // IVA: en la línea de impuestos (BI ... IVA ...). El OCR suele leer 'IVA' como 'JUA'/'1VA'
+  // y 'G16%' como '616%'. Estrategia: ubicar esa línea, quitar los porcentajes y tomar el
+  // último monto (el IVA va después de la base imponible).
+  const montosLinea=l=>{
+    const sin=l.replace(/[\d.,]+\s*%/g,' ');            // quita porcentajes (16,00%)
+    return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
+  };
+  let lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
+             || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
+  if(lineaImp){ const ms=montosLinea(lineaImp); if(ms.length) d.iva=ms[ms.length-1]; }
 
   // Total: primero 'TOTAL … Bs'; si falla, el mayor monto de la factura
-  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*,\s?\d{2})/i);
+  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*[.,]\d{2})/i);
   d.monto_total = (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
 
   return d;
