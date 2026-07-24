@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.6</div>
+  <div class="sub">OFICA Representaciones · v2.7</div>
 </div>
 
 <div class="wrap">
@@ -400,9 +400,23 @@ function parseFactura(text){
     const sin=l.replace(/[\d.,]+\s*%/g,' ');            // quita porcentajes (16,00%)
     return [...sin.matchAll(/(\d[\d.,\s]{0,14}?[.,]\d{2})(?!\d)/g)].map(m=>numVE(m[1])).filter(v=>v!=null);
   };
+
+  // Factura EXENTA de IVA: si aparece 'EXENTO/EXENTA' con un monto igual al total,
+  // toda la factura está exenta → base = total e IVA = 0.
+  let exenta=false;
+  const lineaEx=lines.find(l=>/EXENT[OA]/i.test(l));
+  if(lineaEx){
+    const msEx=montosLinea(lineaEx);
+    if(d.monto_total==null && msEx.length) d.monto_total=Math.max(...msEx);
+    // "monto igual al total" (tolerancia mínima por redondeo del OCR)
+    if(d.monto_total!=null && msEx.some(v=>Math.abs(v-d.monto_total)<=0.5)) exenta=true;
+  }
+
   const lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
              || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
-  if(lineaImp){
+  if(exenta){
+    d.iva=0;                                             // exenta: IVA = 0 (base = total)
+  }else if(lineaImp){
     const ms=montosLinea(lineaImp);
     if(ms.length){
       const bi=Math.max(...ms);                          // base imponible = mayor monto de la línea
