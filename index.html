@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.6</div>
+  <div class="sub">OFICA Representaciones · v3.7</div>
 </div>
 
 <div class="wrap">
@@ -253,6 +253,48 @@ function guardarComercioDeFila(f){
   const entry={nombre,rif,direccion};
   if(i>=0) COMERCIOS[i]=entry; else COMERCIOS.push(entry);
   guardarComercios();
+  return true;
+}
+
+/* ---------- Base de datos de clientes (nombre + cédula/RIF, único) ----------
+   Igual que con el comercio: la cédula/RIF es un número ÚNICO que identifica al cliente.
+   Al reconocer un cliente (por su cédula, o por parecido de nombre) se sugiere el guardado,
+   tal como la app de cobranza sugiere el cliente de una cobranza. */
+const soloDig=s=>(s||'').replace(/\D/g,'');
+let CLIENTES_DB=(()=>{ try{ return JSON.parse(localStorage.getItem('clientesFacturas')||'[]'); }catch(e){ return []; } })();
+function guardarClientesDB(){ try{ localStorage.setItem('clientesFacturas', JSON.stringify(CLIENTES_DB)); }catch(e){} }
+// Palabras que no ayudan a distinguir un nombre (se ignoran al comparar).
+const STOP_NOMBRE=new Set(['de','del','la','el','los','las','y','e','ca','cia','sa','srl','rif','ci','cliente','razon','social']);
+function tokensNombre(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+    .split(/[^a-z0-9]+/).filter(w=>w.length>=3 && !STOP_NOMBRE.has(w) && !/^\d+$/.test(w));
+}
+// Reconoce por la cédula/RIF (clave única): compara solo los dígitos, tolerante al OCR.
+function buscarClientePorCedula(ced){
+  const d=soloDig(ced); if(d.length<6) return null;
+  return CLIENTES_DB.find(c=>{ const dc=soloDig(c.cedula); return dc.length>=6 && (dc===d || dc.includes(d) || d.includes(dc)); }) || null;
+}
+// Sugiere por parecido de nombre (mismo método de puntaje que cobranza: cuántos tokens coinciden).
+function buscarClientePorNombre(nom){
+  const toks=tokensNombre(nom); if(!toks.length) return null;
+  let best=null;
+  for(const c of CLIENTES_DB){
+    const cn=tokensNombre(c.nombre);
+    let score=0, mlen=0;
+    for(const t of toks){ if(cn.includes(t)){ score++; mlen+=t.length; } }
+    if(score>0 && (!best || score>best.score || (score===best.score && mlen>best.mlen))) best={c,score,mlen};
+  }
+  return (best && (best.score>=2 || best.mlen>=6)) ? best.c : null;
+}
+// Guarda/actualiza un cliente en la base (clave = cédula/RIF). Requiere una cédula válida.
+function guardarClienteDeFila(f){
+  const nombre=(f.nombre_razon_social||'').trim(), cedula=(f.cedula_rif||'').trim();
+  const d=soloDig(cedula);
+  if(d.length<6 || !nombre) return false;         // sin cédula única o sin nombre no se guarda
+  const i=CLIENTES_DB.findIndex(c=>soloDig(c.cedula)===d);
+  const entry={cedula,nombre};
+  if(i>=0) CLIENTES_DB[i]=entry; else CLIENTES_DB.push(entry);
+  guardarClientesDB();
   return true;
 }
 
@@ -603,6 +645,7 @@ function facturaDuplicada(f, excluirId){
 function guardarLoteActual(){
   const dups=[];
   filas.forEach(f=>{
+    guardarClienteDeFila(f);                 // guarda el cliente (nombre + cédula/RIF) en la base
     const dup=facturaDuplicada(f, f.id);
     if(dup){ dups.push(f); return; }        // ya existe: no se guarda (evita duplicados)
     if(f.id){ const i=GUARDADAS.findIndex(g=>g.id===f.id); if(i>=0){ GUARDADAS[i]={...f, guardadoEn:GUARDADAS[i].guardadoEn||Date.now()}; return; } }
@@ -645,7 +688,7 @@ function pintarFormularios(){
         `<div class="fsub">${esc(f.archivo)}</div>`+
       `</div><button class="fx" title="Eliminar" data-del="${i}">✕</button></div>`+
       (f.duplicada?`<div class="warn-box">⚠ Esta factura (Nº ${esc(f.numero_factura||'—')}) ya fue procesada. No se guardará para evitar duplicados.</div>`:'')+
-      `<div class="fsection">Información general${f.reconocido?'<span class="recon">✓ comercio reconocido</span>':''}</div>`+
+      `<div class="fsection">Información general${f.reconocido?'<span class="recon">✓ comercio reconocido</span>':''}${f.clienteReconocido?'<span class="recon">✓ cliente reconocido</span>':''}</div>`+
       `<div class="fgrid">`+
         campo(i,'nombre_razon_social','Nombre o Razón Social',f.nombre_razon_social,'Nombre del cliente')+
         campo(i,'cedula_rif','Cédula o RIF',f.cedula_rif,'V-12345678')+
@@ -673,8 +716,10 @@ function pintarFormularios(){
         `<button type="button" class="link" data-ver>Ver texto leído</button>`+
         `<button type="button" class="link" data-copiar>Copiar texto</button>`+
         `<button type="button" class="link" data-guardar>Guardar comercio en base</button>`+
+        `<button type="button" class="link" data-guardar-cli>Guardar cliente en base</button>`+
         `<span class="copiado" data-ok style="display:none">¡Copiado!</span>`+
         `<span class="copiado" data-guardado style="display:none">¡Guardado!</span>`+
+        `<span class="copiado" data-guardado-cli style="display:none">¡Cliente guardado!</span>`+
       `</div>`+
       `<pre class="textobox" data-texto>${esc(f.texto||'(sin texto)')}</pre>`;
     // Enlaces de edición
@@ -683,18 +728,25 @@ function pintarFormularios(){
         const k=inp.dataset.k;
         filas[i][k]=inp.value.trim();
         const f=filas[i];
+        const setTxt=(kk,v)=>{ f[kk]=v==null?'':v; const el=card.querySelector('input[data-k="'+kk+'"]'); if(el && el!==inp) el.value=f[kk]; };
+        const marcarRecon=texto=>{ const sec=card.querySelector('.fsection'); if(sec && !sec.innerHTML.includes(texto)) sec.insertAdjacentHTML('beforeend','<span class="recon">✓ '+texto+'</span>'); };
         // Al corregir/incluir el RIF (o el nombre) del comercio, buscar en la base y autocompletar.
         if(k==='rif_comercio' || k==='comercio'){
           const c = k==='rif_comercio' ? buscarComercioPorRif(f.rif_comercio) : buscarComercioPorNombre(f.comercio);
           if(c){
-            const setTxt=(kk,v)=>{ f[kk]=v==null?'':v; const el=card.querySelector('input[data-k="'+kk+'"]'); if(el && el!==inp) el.value=f[kk]; };
             setTxt('comercio', c.nombre);                    // actualiza COMERCIO
             setTxt('direccion_fiscal', c.direccion||'');     // actualiza DIRECCIÓN FISCAL
             if(k!=='rif_comercio') setTxt('rif_comercio', c.rif);  // si buscó por nombre, completa el RIF
-            f.reconocido=true;
-            const sec=card.querySelector('.fsection');
-            if(sec && !sec.querySelector('.recon')) sec.insertAdjacentHTML('beforeend','<span class="recon">✓ comercio reconocido</span>');
+            f.reconocido=true; marcarRecon('comercio reconocido');
           }
+        }
+        // Al corregir/incluir la CÉDULA o el NOMBRE del cliente, buscar en la base y sugerir.
+        if(k==='cedula_rif'){
+          const cl=buscarClientePorCedula(f.cedula_rif);
+          if(cl){ setTxt('nombre_razon_social', cl.nombre); f.clienteReconocido=true; marcarRecon('cliente reconocido'); }
+        }else if(k==='nombre_razon_social'){
+          const cl=buscarClientePorNombre(f.nombre_razon_social);
+          if(cl){ if(!soloDig(f.cedula_rif)) setTxt('cedula_rif', cl.cedula); f.clienteReconocido=true; marcarRecon('cliente reconocido'); }
         }
         const set=(kk,v)=>{const el=card.querySelector('input[data-k="'+kk+'"]'); if(el) el.value=fmt(v);};
         // Al corregir la FECHA, recalcular la tasa BCV de esa fecha desde la base de cobranza.
@@ -728,6 +780,12 @@ function pintarFormularios(){
     btnGuar.addEventListener('click',()=>{
       if(guardarComercioDeFila(filas[i])){ okG.style.display='inline'; setTimeout(()=>{okG.style.display='none';},1500); }
     });
+    // Guardar cliente en la base de datos (nombre + cédula/RIF)
+    const btnGuarCli=card.querySelector('[data-guardar-cli]'), okGC=card.querySelector('[data-guardado-cli]');
+    btnGuarCli.addEventListener('click',()=>{
+      if(guardarClienteDeFila(filas[i])){ okGC.style.display='inline'; setTimeout(()=>{okGC.style.display='none';},1500); }
+      else alert('Para guardar el cliente hace falta el nombre y la cédula/RIF.');
+    });
     cont.appendChild(card);
   });
   $('resBadge').textContent='✓ '+filas.length+' factura'+(filas.length!==1?'s':'');
@@ -760,6 +818,13 @@ async function procesar(files){
       d.direccion_fiscal='';
       const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
       if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
+      // ¿reconoce al cliente? primero por cédula/RIF (único); si no, por parecido de nombre
+      let cli=buscarClientePorCedula(d.cedula_rif);
+      if(cli){ d.nombre_razon_social=cli.nombre; d.cedula_rif=cli.cedula; d.clienteReconocido=true; }
+      else{
+        cli=buscarClientePorNombre(d.nombre_razon_social);
+        if(cli){ d.nombre_razon_social=cli.nombre; if(!soloDig(d.cedula_rif)) d.cedula_rif=cli.cedula; d.clienteReconocido=true; }
+      }
       d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV de la fecha de la factura (base de cobranza)
       if(facturaDuplicada(d)) d.duplicada=true;        // ¿ya está entre las facturas procesadas?
       filas.push({archivo:f.name, texto:text, ...d});
