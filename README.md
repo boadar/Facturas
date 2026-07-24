@@ -19,8 +19,10 @@ Abre la app y sube (o toma foto de) una o varias facturas. Extrae:
 - **Monto total**
 - **Base** (calculada: `Total − IVA`)
 
-Los datos se muestran en una tabla **editable** (puedes corregir cualquier campo antes de
-exportar) y se descargan a **Excel** o **CSV**.
+Los datos se muestran en tarjetas **editables** (puedes corregir cualquier campo). Al pulsar
+**Guardar facturas** pasan a un **reporte de facturas guardadas** (almacenado en el propio
+dispositivo), donde puedes **editar**, **eliminar** (una, varias o todas) y descargarlas a
+**Excel** o **CSV**.
 
 ## Publicar en GitHub Pages
 

@@ -87,12 +87,35 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .link{color:var(--acc);background:none;border:none;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;padding:0}
 .textobox{display:none;margin-top:10px;background:#f7f9fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#334}
 .copiado{color:var(--ok);font-size:12px;font-weight:600;align-self:center}
+/* Reporte de facturas guardadas (estilo cobranza) */
+.rphint{color:var(--mut);font-size:13px;margin:0 0 14px;line-height:1.5}
+.rpbar{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;padding:0 2px}
+.rpsel{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--txt);cursor:pointer;user-select:none}
+.rpsel input{width:18px;height:18px;accent-color:var(--acc);cursor:pointer}
+.rpdel{color:var(--danger);background:none;border:none;font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-decoration:underline;padding:0}
+.rpdel[disabled]{opacity:.4;cursor:default;text-decoration:none}
+.rcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;display:flex;gap:12px;align-items:flex-start}
+.rcard .chk{width:18px;height:18px;margin-top:3px;accent-color:var(--acc);flex:0 0 auto;cursor:pointer}
+.rbody{flex:1;min-width:0}
+.rtop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rname{font-size:16px;font-weight:700;color:var(--txt);cursor:pointer}
+.rname:hover{color:var(--acc)}
+.ramount{font-size:16px;font-weight:700;color:var(--txt);white-space:nowrap;text-align:right}
+.rmeta{font-size:12px;color:var(--mut);margin-top:3px}
+.rbadge{display:inline-block;font-size:11px;font-weight:700;color:var(--ok);background:#e1f5ee;border-radius:8px;padding:3px 9px;margin-top:8px}
+.rbot{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+.rref{font-size:12px;color:var(--mut);min-width:0;word-break:break-word}
+.ractions{display:flex;gap:14px;flex:0 0 auto}
+.ractions button{background:none;border:none;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;padding:0}
+.ractions .ed{color:var(--acc)}
+.ractions .el{color:var(--danger)}
+.rpvacio{text-align:center;color:var(--mut);font-size:14px;padding:40px 10px}
 </style>
 </head>
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v2.4</div>
+  <div class="sub">OFICA Representaciones · v2.5</div>
 </div>
 
 <div class="wrap">
@@ -112,6 +135,10 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
       <div class="d">Acepta JPG, PNG, WEBP, GIF y PDF</div>
       <div class="lista" id="lista"></div>
     </label>
+    <button class="btn btn-ghost" id="btnVerGuardadas" style="margin-top:12px;display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      Ver facturas guardadas (<span id="cntGuardadas">0</span>)
+    </button>
     <div class="hint">Todo el procesamiento ocurre en tu dispositivo (OCR local). No se envía nada a ningún servidor.<br>Los datos se pueden corregir antes de exportar.</div>
   </div>
 
@@ -122,18 +149,30 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
     <div class="bar"><i id="pbar"></i></div>
   </div>
 
-  <!-- Resultados -->
+  <!-- Resultados del OCR (revisión / edición) -->
   <div id="scResult" style="display:none">
     <div class="sheet-title"><span class="badge badge-ok" id="resBadge">✓ 0 facturas</span></div>
-    <div class="toolbar">
-      <button class="btn btn-acc" id="btnXlsx"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Excel</button>
-      <button class="btn btn-ghost" id="btnCsv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>CSV</button>
-    </div>
     <div id="lista-facturas"></div>
     <div class="editnote">Revisa y corrige los campos si hace falta. La Base se calcula sola (Total − IVA).</div>
     <div class="toolbar" style="margin-top:14px">
+      <button class="btn btn-ok" id="btnGuardar"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M5 12l5 5 9-11"/></svg>Guardar facturas</button>
       <label class="btn btn-ghost" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Agregar más</label>
     </div>
+  </div>
+
+  <!-- Reporte de facturas guardadas -->
+  <div id="scReport" style="display:none">
+    <div class="toolbar">
+      <label class="btn btn-acc" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Nuevas facturas</label>
+      <button class="btn btn-ok" id="btnXlsx"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Excel</button>
+      <button class="btn btn-ghost" id="btnCsv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>CSV</button>
+    </div>
+    <p class="rphint">Facturas guardadas en este dispositivo. Puedes <b>editar</b> o <b>eliminar</b> cualquiera, o descargarlas a Excel/CSV.</p>
+    <div class="rpbar">
+      <label class="rpsel"><input type="checkbox" id="selTodas"> Seleccionar todas</label>
+      <button class="rpdel" id="btnElimSel" disabled>Eliminar</button>
+    </div>
+    <div id="lista-reporte"></div>
   </div>
 </div>
 
@@ -429,7 +468,22 @@ async function ocr(worker,img,onProg){
 }
 
 /* ---------- Estado y tabla ---------- */
-let filas=[]; // {archivo, ...campos}
+let filas=[]; // {archivo, ...campos} — lote actual (recién leído del OCR / en edición)
+
+/* ---------- Base de datos de facturas guardadas (en el navegador) ---------- */
+let GUARDADAS=(()=>{ try{ return JSON.parse(localStorage.getItem('facturasGuardadas')||'[]'); }catch(e){ return []; } })();
+function persistirGuardadas(){ try{ localStorage.setItem('facturasGuardadas', JSON.stringify(GUARDADAS)); }catch(e){} }
+function nuevoId(){ return 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+// Fecha/hora legible del momento en que se guardó (ej. 24/7/2026 15:30)
+function fmtGuardado(ms){ const d=new Date(ms); return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+// Guarda (o actualiza) el lote actual en la base de datos de facturas guardadas.
+function guardarLoteActual(){
+  filas.forEach(f=>{
+    if(f.id){ const i=GUARDADAS.findIndex(g=>g.id===f.id); if(i>=0){ GUARDADAS[i]={...f, guardadoEn:GUARDADAS[i].guardadoEn||Date.now()}; return; } }
+    f.id=nuevoId(); GUARDADAS.unshift({...f, guardadoEn:Date.now()});
+  });
+  persistirGuardadas();
+}
 
 function baseDe(f){
   const iva=numVE(f.iva), tot=numVE(f.monto_total);
@@ -537,6 +591,7 @@ async function procesar(files){
   if(!files.length) return;
   $('scStart').style.display='none';
   $('scResult').style.display='none';
+  $('scReport').style.display='none';
   $('progress').style.display='block';
   $('pmsg').textContent='Consultando tasa del BCV…';
   await actualizarTasaHoy();        // alimenta la tasa del día desde el BCV (dolarapi)
@@ -569,11 +624,82 @@ async function procesar(files){
   $('scResult').style.display='block';
 }
 
+/* ---------- Navegación entre pantallas ---------- */
+function mostrar(sc){
+  ['scStart','scResult','scReport'].forEach(id=>$(id).style.display='none');
+  $('progress').style.display='none';
+  $(sc).style.display='block';
+  if(sc==='scStart') refrescarInicio();
+  if(sc==='scReport') pintarReporte();
+  window.scrollTo(0,0);
+}
+function refrescarInicio(){
+  const n=GUARDADAS.length;
+  $('cntGuardadas').textContent=n;
+  $('btnVerGuardadas').style.display=n?'flex':'none';
+}
+
+/* ---------- Reporte de facturas guardadas ---------- */
+function pintarReporte(){
+  const cont=$('lista-reporte'); cont.innerHTML='';
+  if(!GUARDADAS.length){
+    cont.innerHTML='<div class="rpvacio">Aún no has guardado facturas.<br>Sube facturas y pulsa «Guardar facturas».</div>';
+  }
+  GUARDADAS.forEach(f=>{
+    const cliente=(f.nombre_razon_social||f.cedula_rif||'—').trim();
+    const meta=['Nº '+(f.numero_factura||'—'), (f.fecha_hora||'sin fecha'), cliente].join(' · ');
+    const usd=totalUsd(f);
+    const ref=['RIF '+(f.rif_comercio||'—'), 'IVA '+ (fmt(numVE(f.iva))||'0,00')+' Bs', (usd!=null?fmt(usd)+' $':'')].filter(Boolean).join(' · ');
+    const card=document.createElement('div');
+    card.className='rcard';
+    card.innerHTML=
+      `<input type="checkbox" class="chk" data-id="${esc(f.id)}">`+
+      `<div class="rbody">`+
+        `<div class="rtop">`+
+          `<div class="rname" data-edit="${esc(f.id)}">${esc(f.comercio||'(sin comercio)')}</div>`+
+          `<div class="ramount">${fmt(numVE(f.monto_total))||'0,00'} Bs</div>`+
+        `</div>`+
+        `<div class="rmeta">${esc(meta)}</div>`+
+        `<div class="rbadge">Guardado ${esc(fmtGuardado(f.guardadoEn))}</div>`+
+        `<div class="rbot">`+
+          `<div class="rref">${esc(ref)}</div>`+
+          `<div class="ractions"><button class="ed" data-edit="${esc(f.id)}">Editar</button><button class="el" data-del="${esc(f.id)}">Eliminar</button></div>`+
+        `</div>`+
+      `</div>`;
+    cont.appendChild(card);
+  });
+  // Editar
+  cont.querySelectorAll('[data-edit]').forEach(el=>el.addEventListener('click',()=>editarGuardada(el.dataset.edit)));
+  // Eliminar una
+  cont.querySelectorAll('[data-del]').forEach(el=>el.addEventListener('click',()=>{
+    const f=GUARDADAS.find(g=>g.id===el.dataset.del);
+    if(f && confirm('¿Eliminar la factura de '+(f.comercio||'este comercio')+'?')){
+      GUARDADAS=GUARDADAS.filter(g=>g.id!==el.dataset.del); persistirGuardadas(); pintarReporte();
+    }
+  }));
+  // Casillas de selección
+  cont.querySelectorAll('.chk').forEach(c=>c.addEventListener('change',actualizarBarraSel));
+  $('selTodas').checked=false;
+  actualizarBarraSel();
+}
+function seleccionadas(){ return [...document.querySelectorAll('#lista-reporte .chk:checked')].map(c=>c.dataset.id); }
+function actualizarBarraSel(){
+  const n=seleccionadas().length;
+  const b=$('btnElimSel');
+  b.disabled=!n; b.textContent=n?('Eliminar ('+n+')'):'Eliminar';
+}
+function editarGuardada(id){
+  const f=GUARDADAS.find(g=>g.id===id); if(!f) return;
+  filas=[{...f}];      // se edita una copia; al pulsar «Guardar facturas» se actualiza por su id
+  pintarFormularios();
+  mostrar('scResult');
+}
+
 /* ---------- Exportación ---------- */
 function matriz(){
   const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Tasa de cambio','BASE Bs.','IVA Bs.','TOTAL Bs.','BASE $','IVA $','TOTAL $'];
   const rows=[enc];
-  filas.forEach(f=>{
+  GUARDADAS.forEach(f=>{
     const bs=baseDe(f);
     rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(numVE(f.tasa_cambio)),fmt(bs),fmt(numVE(f.iva)),fmt(numVE(f.monto_total)),fmt(enUsd(bs,f)),fmt(enUsd(numVE(f.iva),f)),fmt(totalUsd(f))]);
   });
@@ -593,12 +719,35 @@ $('btnCsv').onclick=()=>{
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='facturas.csv'; a.click();
 };
 
+/* ---------- Guardar lote y navegación ---------- */
+$('btnGuardar').addEventListener('click',()=>{
+  if(!filas.length) return;
+  guardarLoteActual();
+  filas=[];
+  mostrar('scReport');
+});
+$('btnVerGuardadas').addEventListener('click',()=>mostrar('scReport'));
+$('selTodas').addEventListener('change',e=>{
+  document.querySelectorAll('#lista-reporte .chk').forEach(c=>{ c.checked=e.target.checked; });
+  actualizarBarraSel();
+});
+$('btnElimSel').addEventListener('click',()=>{
+  const ids=seleccionadas(); if(!ids.length) return;
+  if(confirm('¿Eliminar '+ids.length+' factura'+(ids.length!==1?'s':'')+' seleccionada'+(ids.length!==1?'s':'')+'?')){
+    const set=new Set(ids);
+    GUARDADAS=GUARDADAS.filter(g=>!set.has(g.id)); persistirGuardadas(); pintarReporte();
+  }
+});
+
 /* ---------- Entradas de archivo ---------- */
 $('file').addEventListener('change',e=>{ procesar(e.target.files); e.target.value=''; });
 const drop=$('drop');
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hover');}));
 ['dragleave','dragend'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hover');}));
 drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('hover'); if(e.dataTransfer.files.length) procesar(e.dataTransfer.files);});
+
+/* ---------- Inicio ---------- */
+refrescarInicio();
 </script>
 </body>
 </html>
