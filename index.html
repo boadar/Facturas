@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.5</div>
+  <div class="sub">OFICA Representaciones · v3.6</div>
 </div>
 
 <div class="wrap">
@@ -416,6 +416,15 @@ function parseFactura(text){
   // prefijo V/E/J/G/P (el del cliente), no el del comercio.
   const lc=lines.find(l=>/RIF\s*[\/|]?\s*C\s*[.,\s]*[I1lLTt]/i.test(l) || /\bC\s*[.,\s]*[I1lLTt]\s*[.,\s]*[:._-]/i.test(l));
   if(lc){ const m=lc.match(/([VEJGP]\s*-?\s*\d{6,10})/i) || lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=normalizaRif(m[1].replace(/\s/g,'')); }
+  // Respaldo: si no se pudo por la etiqueta, buscar directamente una cédula V/E + 7-9 dígitos
+  // (persona natural), evitando el RIF del comercio (empieza por J y suele estar arriba).
+  if(!d.cedula_rif){
+    for(const l of lines){
+      if(/FARMATODO|SENIAT|C\.\s?A\./i.test(l)) continue;
+      const m=l.match(/\b([VEve])\s*[-.]?\s*(\d{7,9})\b/);
+      if(m){ d.cedula_rif=normalizaRif(m[1]+m[2]); break; }
+    }
+  }
 
   // Nombre / Razón social del cliente. Se busca por 'SOCIAL' (más fiable que 'RAZON', que el
   // OCR suele leer como 'KAZON'). El nombre puede quedar en la misma línea o en la siguiente.
@@ -438,9 +447,10 @@ function parseFactura(text){
   const fecha=mF? mF[1].replace(/\s+/g,'').replace(/-+/g,'-') : null;
   d.fecha_hora=[fecha, mH&&mH[1]].filter(Boolean).join(' ');
 
-  // Número de factura
-  const mNf=t.match(/FACTURA\s*[:\-]?\s*(\d{4,})/i);
-  if(mNf) d.numero_factura=mNf[1];
+  // Número de factura. El OCR a veces lee los ceros/unos iniciales como letras (O, o, I, l);
+  // se aceptan y se normalizan a dígitos.
+  const mNf=t.match(/FACTURA\s*N?[°º]?\s*[:\-]?\s*([\dOoQIlL]{4,})/i);
+  if(mNf){ const n=mNf[1].replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1'); if(/^\d{4,}$/.test(n)) d.numero_factura=n; }
 
   // Total: el total real está en las líneas de RESUMEN (TOTAL / EXENTO / A PAGAR), normalmente
   // repetido varias veces; ahí se lee mucho mejor que agarrando el mayor monto suelto (que podría
@@ -498,6 +508,10 @@ function parseFactura(text){
         d.iva=ms[ms.length-1];                           // fallback: último monto de la línea
     }
   }
+
+  // Si no se pudo determinar el IVA y NO hay ninguna línea de impuesto (%) en la factura,
+  // se asume exenta: IVA = 0 y Base = Total. (Cubre recibos exentos aunque el OCR dañe 'EXENTO'.)
+  if(d.iva==null && d.monto_total!=null && !lineaImp) d.iva=0;
 
   return d;
 }
