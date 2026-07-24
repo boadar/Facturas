@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.7</div>
+  <div class="sub">OFICA Representaciones · v3.8</div>
 </div>
 
 <div class="wrap">
@@ -163,6 +163,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
     <div class="toolbar" style="margin-top:14px">
       <button class="btn btn-ok" id="btnGuardar"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M5 12l5 5 9-11"/></svg>Guardar facturas</button>
       <label class="btn btn-ghost" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Agregar más</label>
+      <button class="btn btn-ghost" id="btnSalir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/><path d="M16 16l5-4-5-4M21 12H9"/></svg>Salir</button>
     </div>
   </div>
 
@@ -965,6 +966,11 @@ $('btnGuardar').addEventListener('click',()=>{
   }
   filas=[];
   mostrar('scReport');
+});
+$('btnSalir').addEventListener('click',()=>{
+  if(filas.length && !confirm('¿Salir sin guardar? Se perderán las facturas de este formulario que no hayas guardado.')) return;
+  filas=[];
+  mostrar(GUARDADAS.length?'scReport':'scStart');   // vuelve al reporte si hay guardadas; si no, al inicio
 });
 $('btnHome').addEventListener('click',()=>mostrar('scStart'));
 $('btnVerGuardadas').addEventListener('click',()=>mostrar('scReport'));
