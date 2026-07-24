@@ -81,7 +81,9 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .fld input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,157,220,.18);background:#fff}
 .fld input.ro{background:#eef4f8;color:var(--mut);font-weight:600}
 .fld .num{text-align:right;font-variant-numeric:tabular-nums}
-.flinks{display:flex;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.fgrid .full{grid-column:1/-1}
+.recon{display:inline-block;font-size:10px;font-weight:700;color:var(--ok);background:#e1f5ee;border-radius:6px;padding:2px 7px;margin-left:8px;vertical-align:middle}
+.flinks{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
 .link{color:var(--acc);background:none;border:none;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;padding:0}
 .textobox{display:none;margin-top:10px;background:#f7f9fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#334}
 .copiado{color:var(--ok);font-size:12px;font-weight:600;align-self:center}
@@ -90,7 +92,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.8</div>
+  <div class="sub">OFICA Representaciones · v2.0</div>
 </div>
 
 <div class="wrap">
@@ -144,6 +146,54 @@ if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudf
 const $=id=>document.getElementById(id);
 const COLS=['archivo','comercio','rif_comercio','cedula_rif','nombre_razon_social','fecha_hora','numero_factura','base','iva','monto_total'];
 
+/* ---------- Base de datos de comercios (en el navegador) ---------- */
+// Se guarda en localStorage. Arranca con FARMATODO ya cargado.
+const SEED_COMERCIOS=[
+  {nombre:'FARMATODO, C.A.', rif:'J-00202001', direccion:'Av. Los Guayabitos, CC Expreso Baruta, Nivel 5 Of. Única, Urb. La Trinidad (Sector Piedra Azul), Caracas.'}
+];
+const normTxt=s=>(s||'').toUpperCase().normalize('NFD').replace(/[^A-Z0-9]/g,'');
+function cargarComercios(){
+  let arr=[];
+  try{ const s=localStorage.getItem('comercios'); if(s) arr=JSON.parse(s); }catch(e){}
+  if(!Array.isArray(arr)||!arr.length) arr=SEED_COMERCIOS.slice();
+  // asegura que el seed (FARMATODO) siempre esté disponible
+  for(const seed of SEED_COMERCIOS){
+    const dR=normTxt(seed.rif);
+    if(!arr.some(c=>normTxt(c.rif)===dR || normTxt(c.nombre)===normTxt(seed.nombre))) arr.push(seed);
+  }
+  return arr;
+}
+function guardarComercios(){ try{ localStorage.setItem('comercios', JSON.stringify(COMERCIOS)); }catch(e){} }
+let COMERCIOS=cargarComercios();
+
+// Busca en la base un comercio que coincida con el texto OCR o el RIF leído.
+function matchComercio(texto, rifParsed){
+  const tN=normTxt(texto);
+  const dParsed=(rifParsed||'').replace(/\D/g,'');
+  for(const c of COMERCIOS){
+    const nN=normTxt(c.nombre).replace(/(SACA|CA|SA|SRL)$/,'');   // núcleo del nombre (sin sufijo C.A./S.A.)
+    if(nN.length>=4 && tN.includes(nN)) return c;                 // el nombre aparece en el texto de la factura
+    const dRif=(c.rif||'').replace(/\D/g,'');
+    if(dRif.length>=6){
+      if(tN.includes(dRif)) return c;
+      if(dParsed.length>=6 && (dRif.includes(dParsed)||dParsed.includes(dRif))) return c;
+    }
+  }
+  return null;
+}
+
+// Guarda/actualiza un comercio en la base (para que se reconozca la próxima vez).
+function guardarComercioDeFila(f){
+  const nombre=(f.comercio||'').trim(), rif=(f.rif_comercio||'').trim(), direccion=(f.direccion_fiscal||'').trim();
+  if(!nombre && !rif) return false;
+  const dR=rif.replace(/\D/g,'');
+  const i=COMERCIOS.findIndex(c=> (dR && (c.rif||'').replace(/\D/g,'')===dR) || (nombre && normTxt(c.nombre)===normTxt(nombre)));
+  const entry={nombre,rif,direccion};
+  if(i>=0) COMERCIOS[i]=entry; else COMERCIOS.push(entry);
+  guardarComercios();
+  return true;
+}
+
 /* ---------- Utilidades de números (formato venezolano) ---------- */
 function numVE(s){
   if(s==null) return null;
@@ -155,7 +205,13 @@ function numVE(s){
   const n=parseFloat(s.replace(/[.,]/g,''));
   return isNaN(n)?null:n;
 }
-const fmt=n=> n==null||isNaN(n) ? '' : n.toFixed(2);
+// Formato venezolano: punto para miles, coma para decimales (ej. 21.947,26)
+function fmt(n){
+  if(n==null||isNaN(n)) return '';
+  const neg=n<0; let [ent,dec]=Math.abs(n).toFixed(2).split('.');
+  ent=ent.replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  return (neg?'-':'')+ent+','+dec;
+}
 
 /* ---------- Parseo de la factura ---------- */
 function limpiaComercio(s){
@@ -351,7 +407,7 @@ function campo(i,clave,etiqueta,val,ph,opts){
   opts=opts||{};
   const cls=(opts.num?'num ':'')+(opts.ro?'ro':'');
   const attrs=(opts.ro?'readonly ':'')+(opts.num?'inputmode="decimal" ':'');
-  return `<div class="fld"><label>${etiqueta}</label>`+
+  return `<div class="fld${opts.full?' full':''}"><label>${etiqueta}</label>`+
     `<input class="${cls.trim()}" data-i="${i}" data-k="${clave}" ${attrs}value="${esc(val)}" placeholder="${esc(ph||'')}"></div>`;
 }
 
@@ -366,25 +422,28 @@ function pintarFormularios(){
         `<div class="ftitle">Factura ${i+1}</div>`+
         `<div class="fsub">${esc(f.archivo)}</div>`+
       `</div><button class="fx" title="Eliminar" data-del="${i}">✕</button></div>`+
-      `<div class="fsection">Información general</div>`+
+      `<div class="fsection">Información general${f.reconocido?'<span class="recon">✓ comercio reconocido</span>':''}</div>`+
       `<div class="fgrid">`+
         campo(i,'nombre_razon_social','Nombre o Razón Social',f.nombre_razon_social,'Nombre del cliente')+
         campo(i,'cedula_rif','Cédula o RIF',f.cedula_rif,'V-12345678')+
         campo(i,'comercio','Comercio',f.comercio,'Nombre del comercio')+
         campo(i,'rif_comercio','RIF del comercio',f.rif_comercio,'J-12345678-9')+
+        campo(i,'direccion_fiscal','Dirección fiscal del comercio',f.direccion_fiscal,'Dirección del comercio',{full:true})+
         campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA HH:MM')+
         campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000')+
       `</div>`+
       `<div class="fsection">Montos</div>`+
       `<div class="fgrid tres">`+
-        campo(i,'monto_total','Total',fmt(numVE(f.monto_total)),'0.00',{num:true})+
-        campo(i,'iva','IVA',fmt(numVE(f.iva)),'0.00',{num:true})+
+        campo(i,'monto_total','Total',fmt(numVE(f.monto_total)),'0,00',{num:true})+
+        campo(i,'iva','IVA',fmt(numVE(f.iva)),'0,00',{num:true})+
         campo(i,'base','Base (Total − IVA)',fmt(base),'',{num:true,ro:true})+
       `</div>`+
       `<div class="flinks">`+
         `<button type="button" class="link" data-ver>Ver texto leído</button>`+
         `<button type="button" class="link" data-copiar>Copiar texto</button>`+
+        `<button type="button" class="link" data-guardar>Guardar comercio en base</button>`+
         `<span class="copiado" data-ok style="display:none">¡Copiado!</span>`+
+        `<span class="copiado" data-guardado style="display:none">¡Guardado!</span>`+
       `</div>`+
       `<pre class="textobox" data-texto>${esc(f.texto||'(sin texto)')}</pre>`;
     // Enlaces de edición
@@ -411,6 +470,11 @@ function pintarFormularios(){
       catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(_){} ta.remove(); }
       ok.style.display='inline'; setTimeout(()=>{ok.style.display='none';},1500);
     });
+    // Guardar comercio en la base de datos
+    const btnGuar=card.querySelector('[data-guardar]'), okG=card.querySelector('[data-guardado]');
+    btnGuar.addEventListener('click',()=>{
+      if(guardarComercioDeFila(filas[i])){ okG.style.display='inline'; setTimeout(()=>{okG.style.display='none';},1500); }
+    });
     cont.appendChild(card);
   });
   $('resBadge').textContent='✓ '+filas.length+' factura'+(filas.length!==1?'s':'');
@@ -436,10 +500,13 @@ async function procesar(files){
         $('pmsg').textContent='Reconociendo texto '+cuenta+' — '+Math.round(p*100)+'%';
       });
       const d=parseFactura(text);
+      d.direccion_fiscal='';
+      const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
+      if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
       filas.push({archivo:f.name, texto:text, ...d});
     }catch(e){
       console.error(e);
-      filas.push({archivo:f.name, texto:'', comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null});
+      filas.push({archivo:f.name, texto:'', comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null, direccion_fiscal:''});
     }
   }
   await worker.terminate();
@@ -450,10 +517,10 @@ async function procesar(files){
 
 /* ---------- Exportación ---------- */
 function matriz(){
-  const enc=['Archivo','Comercio','RIF comercio','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Base','IVA','Total'];
+  const enc=['Archivo','Comercio','RIF comercio','Dirección fiscal','Cédula o RIF','Nombre o Razón Social','Fecha y hora','Nº factura','Base','IVA','Total'];
   const rows=[enc];
   filas.forEach(f=>{
-    rows.push([f.archivo,f.comercio,f.rif_comercio,f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,baseDe(f),numVE(f.iva),numVE(f.monto_total)]);
+    rows.push([f.archivo,f.comercio,f.rif_comercio,f.direccion_fiscal||'',f.cedula_rif,f.nombre_razon_social,f.fecha_hora,f.numero_factura,fmt(baseDe(f)),fmt(numVE(f.iva)),fmt(numVE(f.monto_total))]);
   });
   return rows;
 }
