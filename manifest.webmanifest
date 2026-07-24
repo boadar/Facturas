@@ -1,0 +1,12 @@
+{
+  "name": "Procesador de Facturas",
+  "short_name": "Facturas",
+  "description": "Extrae datos de facturas (PDF/imagen) con OCR en el navegador.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef1f4",
+  "theme_color": "#282828",
+  "lang": "es",
+  "icons": []
+}

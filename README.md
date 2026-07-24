@@ -1,74 +1,46 @@
-# Procesador de facturas
+# Procesador de Facturas
 
-Script de línea de comandos que lee facturas en **PDF** e **imagen** (JPG/PNG),
-extrae automáticamente los datos con IA (modelo Claude) y los vuelca a un
-**Excel** y un **CSV**.
+App web para extraer datos de **facturas** (fotos, capturas de pantalla, imágenes o PDF).
+Todo el procesamiento ocurre **en el navegador** con OCR local (Tesseract.js + pdf.js) —
+no hay servidor, no se necesita clave de API y no se envía nada a Internet.
 
-Campos que extrae por factura:
+Mismo modelo que [reporte-cobranza](https://boadar.github.io/reporte-cobranza): una sola
+página estática que puede publicarse en GitHub Pages.
 
-- **Comercio** (nombre del comercio/emisor, p.ej. FARMATODO, C.A.)
-- **RIF del comercio** (RIF de la empresa emisora, formato J-xxxxxxxx)
-- **Cédula o RIF** (del cliente/receptor)
-- **Nombre o Razón Social** (del cliente/receptor)
+## Uso
+
+Abre la app y sube (o toma foto de) una o varias facturas. Extrae:
+
+- **Comercio** y **RIF del comercio** (emisor, el `RIF J-xxxxxxxx` de arriba)
+- **Cédula o RIF** y **Nombre / Razón Social** del cliente
 - **Fecha y hora**
 - **Número de factura**
 - **IVA**
 - **Monto total**
-- **Base** (calculada: `Base = Monto total − IVA`)
+- **Base** (calculada: `Total − IVA`)
 
-Se puede usar de dos formas: como **script de línea de comandos** o como
-**interfaz web** (subiendo las facturas desde el navegador).
+Los datos se muestran en una tabla **editable** (puedes corregir cualquier campo antes de
+exportar) y se descargan a **Excel** o **CSV**.
 
-## Instalación
+## Publicar en GitHub Pages
 
-```bash
-python -m venv .venv && source .venv/bin/activate   # opcional, recomendado
-pip install -r requirements.txt
-```
+El sitio se sirve desde el archivo `index.html` en la rama `main`:
 
-## Configurar la clave de API
+1. En GitHub → **Settings → Pages**.
+2. En **Source**, elige la rama `main` y la carpeta `/ (root)`.
+3. Guarda. En un par de minutos estará disponible en
+   `https://boadar.github.io/facturas`.
 
-El script usa la API de Claude, así que necesitas una clave de Anthropic:
+## Probar localmente
 
-```bash
-export ANTHROPIC_API_KEY="tu-api-key"
-```
-
-(También funciona con `ant auth login` si tienes la CLI de Anthropic.)
-
-## Uso: interfaz web
+Como usa CDNs y workers, ábrelo mediante un servidor local (no con `file://`):
 
 ```bash
-python app.py
-# abre http://127.0.0.1:5000 en el navegador
+python3 -m http.server 8000
+# abre http://localhost:8000
 ```
-
-Arrastra una o varias facturas, procésalas y verás los datos en una tabla.
-Desde ahí puedes descargar el Excel o el CSV.
-
-> Es un servidor local para un solo usuario, sin autenticación; no lo expongas
-> a Internet tal cual.
-
-## Uso: línea de comandos
-
-```bash
-# Procesa todas las facturas de una carpeta
-python procesar_facturas.py ./mis_facturas
-
-# Especificar el archivo Excel de salida
-python procesar_facturas.py ./mis_facturas -o resultados.xlsx
-```
-
-Genera dos archivos:
-
-- `facturas_procesadas.xlsx` — con dos hojas:
-  - **Resumen**: una fila por factura.
-  - **Conceptos**: una fila por partida/línea.
-- `facturas_procesadas.csv` — el resumen en CSV (útil para importar a otros sistemas).
 
 ## Notas
 
-- Formatos soportados: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`.
-- Si un campo no aparece en la factura, se deja vacío (el script no inventa datos).
-- Si una factura falla, el script lo reporta y continúa con las demás.
-- El coste depende del número y tamaño de las facturas (se paga por tokens de la API).
+- El OCR de tickets térmicos/fotos puede tener errores; por eso la tabla es editable.
+- Formatos: JPG, PNG, WEBP, GIF y PDF (se procesa la primera página).
