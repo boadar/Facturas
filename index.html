@@ -78,12 +78,16 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .fld input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,157,220,.18);background:#fff}
 .fld input.ro{background:#eef4f8;color:var(--mut);font-weight:600}
 .fld .num{text-align:right;font-variant-numeric:tabular-nums}
+.flinks{display:flex;gap:18px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.link{color:var(--acc);background:none;border:none;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline;padding:0}
+.textobox{display:none;margin-top:10px;background:#f7f9fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#334}
+.copiado{color:var(--ok);font-size:12px;font-weight:600;align-self:center}
 </style>
 </head>
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.4</div>
+  <div class="sub">OFICA Representaciones · v1.5</div>
 </div>
 
 <div class="wrap">
@@ -336,7 +340,13 @@ function pintarFormularios(){
         campo(i,'monto_total','Total',fmt(numVE(f.monto_total)),'0.00',{num:true})+
         campo(i,'iva','IVA',fmt(numVE(f.iva)),'0.00',{num:true})+
         campo(i,'base','Base (Total − IVA)',fmt(base),'',{num:true,ro:true})+
-      `</div>`;
+      `</div>`+
+      `<div class="flinks">`+
+        `<button type="button" class="link" data-ver>Ver texto leído</button>`+
+        `<button type="button" class="link" data-copiar>Copiar texto</button>`+
+        `<span class="copiado" data-ok style="display:none">¡Copiado!</span>`+
+      `</div>`+
+      `<pre class="textobox" data-texto>${esc(f.texto||'(sin texto)')}</pre>`;
     // Enlaces de edición
     card.querySelectorAll('input:not([readonly])').forEach(inp=>{
       inp.addEventListener('input',()=>{
@@ -346,6 +356,21 @@ function pintarFormularios(){
       });
     });
     card.querySelector('[data-del]').addEventListener('click',()=>{ filas.splice(i,1); pintarFormularios(); });
+    // Ver / ocultar texto leído
+    const pre=card.querySelector('[data-texto]'), btnVer=card.querySelector('[data-ver]');
+    btnVer.addEventListener('click',()=>{
+      const abierto=pre.style.display==='block';
+      pre.style.display=abierto?'none':'block';
+      btnVer.textContent=abierto?'Ver texto leído':'Ocultar texto';
+    });
+    // Copiar texto
+    const btnCop=card.querySelector('[data-copiar]'), ok=card.querySelector('[data-ok]');
+    btnCop.addEventListener('click',async()=>{
+      const t=filas[i].texto||'';
+      try{ await navigator.clipboard.writeText(t); }
+      catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(_){} ta.remove(); }
+      ok.style.display='inline'; setTimeout(()=>{ok.style.display='none';},1500);
+    });
     cont.appendChild(card);
   });
   $('resBadge').textContent='✓ '+filas.length+' factura'+(filas.length!==1?'s':'');
@@ -371,10 +396,10 @@ async function procesar(files){
         $('pmsg').textContent='Reconociendo texto '+cuenta+' — '+Math.round(p*100)+'%';
       });
       const d=parseFactura(text);
-      filas.push({archivo:f.name, ...d});
+      filas.push({archivo:f.name, texto:text, ...d});
     }catch(e){
       console.error(e);
-      filas.push({archivo:f.name, comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null});
+      filas.push({archivo:f.name, texto:'', comercio:'', rif_comercio:'', cedula_rif:'', nombre_razon_social:'(no se pudo leer)', fecha_hora:'', numero_factura:'', iva:null, monto_total:null});
     }
   }
   await worker.terminate();
