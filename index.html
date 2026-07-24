@@ -142,68 +142,120 @@ function numVE(s){
 const fmt=n=> n==null||isNaN(n) ? '' : n.toFixed(2);
 
 /* ---------- Parseo de la factura ---------- */
+function limpiaComercio(s){ return s.replace(/^[^A-Za-zÁÉÍÓÚÑ0-9]*/,'').replace(/^[a-z]\s+/,'').replace(/[.,]\s*$/,'').trim(); }
+
+// Mayor monto de la factura (el total suele ser el más grande) — robusto ante OCR ruidoso.
+function bestMonto(t){
+  const re=/(\d[\d.\s]{0,12}?,\s?\d{2})/g; let m, mx=null;
+  while((m=re.exec(t))){ const v=numVE(m[1]); if(v!=null && (mx==null || v>mx)) mx=v; }
+  return mx;
+}
+
 function parseFactura(text){
   const t=text.replace(/\r/g,'');
   const lines=t.split('\n').map(l=>l.trim()).filter(Boolean);
   const d={comercio:'',rif_comercio:'',cedula_rif:'',nombre_razon_social:'',fecha_hora:'',numero_factura:'',iva:null,monto_total:null};
 
   // RIF del comercio/emisor (arriba, formato J-xxxxxxxx). Evita 'RIF/C.I.'
-  let mRif=t.match(/RIF\s+([JGVEP]-?\s?\d[\d\-]{5,})/i);
+  const mRif=t.match(/RIF\s+([JGVEP]-?\s?\d[\d\-]{5,})/i);
   if(mRif) d.rif_comercio=mRif[1].replace(/\s/g,'').toUpperCase();
 
   // Nombre del comercio: línea siguiente al RIF, o una que termine en C.A.
   const idx=lines.findIndex(l=>/RIF\s+[JGVEP]-?\s?\d/i.test(l));
   if(idx>=0){
     for(let i=idx+1;i<Math.min(idx+3,lines.length);i++){
-      if(lines[i] && !/^RIF/i.test(lines[i]) && !/SENIAT/i.test(lines[i])){ d.comercio=lines[i]; break; }
+      if(lines[i] && !/^RIF/i.test(lines[i]) && !/SENIAT/i.test(lines[i])){ d.comercio=limpiaComercio(lines[i]); break; }
     }
   }
   if(!d.comercio){
     const mCA=t.match(/([A-ZÑ0-9][A-Za-zÑ0-9.,&' ]{2,45}C\.?\s?A\.?)/);
-    if(mCA) d.comercio=mCA[1].trim();
+    if(mCA) d.comercio=limpiaComercio(mCA[1]);
   }
 
-  // Cédula o RIF del cliente ('RIF/C.I.: V...')
-  const mCi=t.match(/RIF\s*\/?\s*C\.?\s*I\.?\s*[:\-]?\s*([VEJGP]-?\d{5,9})/i);
-  if(mCi) d.cedula_rif=mCi[1].replace(/\s/g,'').toUpperCase();
+  // Cédula o RIF del cliente: línea 'RIF/C.I.' (tolerante a 'C.1.', 'C.T.', etc.)
+  const lc=lines.find(l=>/RIF\s*[\/|]?\s*C\s*[.\s]*[I1lLTt]/i.test(l));
+  if(lc){ const m=lc.match(/([A-Za-z]?-?\d{6,10})/); if(m) d.cedula_rif=m[1].toUpperCase().replace(/[\s-]/g,''); }
 
-  // Nombre / Razón social del cliente
-  const mRs=t.match(/RAZ[OÓ]N\s+SOCIAL\s*[:\-]?\s*(.+)/i);
-  if(mRs) d.nombre_razon_social=mRs[1].trim();
+  // Nombre / Razón social del cliente (puede quedar en otra línea por el OCR)
+  const ir=lines.findIndex(l=>/RAZ[OÓ0]N\s+SOCIAL/i.test(l));
+  if(ir>=0){
+    let rem=lines[ir].replace(/.*RAZ[OÓ0]N\s+SOCIAL\s*[:\-]?\s*/i,'').trim();
+    const palabras=rem.split(/\s+/).filter(w=>/[A-Za-zÁÉÍÓÚÑ]{2,}/.test(w));
+    if(palabras.length>=2){ d.nombre_razon_social=rem; }
+    else{
+      // busca en las siguientes líneas una secuencia de nombres (2+ palabras capitalizadas)
+      const nameRe=/([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:De|Del|La|Los|Y|[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)){1,6})\s*$/;
+      for(let j=ir;j<Math.min(ir+4,lines.length);j++){ const m=lines[j].match(nameRe); if(m){ d.nombre_razon_social=m[1].trim(); break; } }
+      if(!d.nombre_razon_social) d.nombre_razon_social=rem;
+    }
+  }
 
-  // Fecha y hora
-  const mF=t.match(/FECHA\s*[:\-]?\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+  // Fecha y hora (tolerante a espacios/guiones sueltos del OCR)
+  const mF=t.match(/FECHA\s*[:\-]?\s*(\d{1,2}\s*[-\/]\s*-?\s*\d{1,2}\s*[-\/]\s*\d{2,4})/i);
   const mH=t.match(/HORA\s*[:\-]?\s*(\d{1,2}:\d{2})/i);
-  d.fecha_hora=[mF&&mF[1], mH&&mH[1]].filter(Boolean).join(' ');
+  const fecha=mF? mF[1].replace(/\s+/g,'').replace(/-+/g,'-') : null;
+  d.fecha_hora=[fecha, mH&&mH[1]].filter(Boolean).join(' ');
 
   // Número de factura
   const mNf=t.match(/FACTURA\s*[:\-]?\s*(\d{4,})/i);
   if(mNf) d.numero_factura=mNf[1];
 
-  // IVA (monto tras 'IVA ... Bs')
-  const mIva=t.match(/IVA[^B\n]*Bs?\.?\s*([\d.]+,\d{2})/i);
+  // IVA (best-effort: monto tras 'IVA … Bs'); si el OCR lo destruye queda vacío (editable)
+  const mIva=t.match(/IVA[^\n]*?Bs?\.?\s*[^\d\n]{0,3}([\d][\d.\s]*,\s?\d{2})/i);
   if(mIva) d.iva=numVE(mIva[1]);
 
-  // Total (monto tras 'TOTAL ... Bs')
-  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d.]+,\d{2})/i);
-  if(mTot) d.monto_total=numVE(mTot[1]);
+  // Total: primero 'TOTAL … Bs'; si falla, el mayor monto de la factura
+  const mTot=t.match(/TOTAL[^\d\n]{0,15}Bs?\.?\s*([\d][\d.\s]*,\s?\d{2})/i);
+  d.monto_total = (mTot? numVE(mTot[1]) : null) ?? bestMonto(t);
 
   return d;
 }
 
-/* ---------- Render de PDF/imagen a algo que OCR pueda leer ---------- */
+/* ---------- Render de PDF/imagen y limpieza previa al OCR ---------- */
+// Binariza (grises + umbral automático Otsu) para quitar marcas de agua y mejorar el OCR.
+function preprocesar(canvas){
+  const ctx=canvas.getContext('2d');
+  const im=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const px=im.data, hist=new Array(256).fill(0), gris=new Uint8Array(px.length/4);
+  for(let i=0,j=0;i<px.length;i+=4,j++){
+    const g=(0.299*px[i]+0.587*px[i+1]+0.114*px[i+2])|0;
+    gris[j]=g; hist[g]++;
+  }
+  const total=gris.length;
+  let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,mx=0,th=127;
+  for(let i=0;i<256;i++){
+    wB+=hist[i]; if(!wB) continue;
+    const wF=total-wB; if(!wF) break;
+    sumB+=i*hist[i];
+    const mB=sumB/wB, mF=(sum-sumB)/wF, between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>mx){ mx=between; th=i; }
+  }
+  for(let i=0,j=0;i<px.length;i+=4,j++){
+    const v=gris[j]>th?255:0; px[i]=px[i+1]=px[i+2]=v;
+  }
+  ctx.putImageData(im,0,0);
+  return canvas;
+}
+
 async function fileToImage(file){
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
   if(file.type==='application/pdf' || /\.pdf$/i.test(file.name)){
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:buf}).promise;
     const page=await pdf.getPage(1);
-    const vp=page.getViewport({scale:2});
-    const canvas=document.createElement('canvas');
+    const vp=page.getViewport({scale:2.5});
     canvas.width=vp.width; canvas.height=vp.height;
-    await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
-    return canvas;
+    await page.render({canvasContext:ctx,viewport:vp}).promise;
+  }else{
+    const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(file); });
+    // Escala para que el lado mayor sea ~2000px (Tesseract lee mejor con buena resolución)
+    const escala=Math.min(2, Math.max(1, 2000/Math.max(img.width,img.height)));
+    canvas.width=Math.round(img.width*escala); canvas.height=Math.round(img.height*escala);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
   }
-  return URL.createObjectURL(file);
+  return preprocesar(canvas);
 }
 async function ocr(img,onProg){
   const res=await Tesseract.recognize(img,'spa',{logger:m=>{
