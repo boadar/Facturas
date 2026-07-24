@@ -61,12 +61,29 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 .bar{height:6px;background:#dfe4e8;border-radius:4px;margin:16px auto 0;max-width:260px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--acc);width:0;transition:width .2s}
 .editnote{font-size:11px;color:var(--mut);text-align:center;margin:8px 0 0}
+/* Tarjetas-formulario de resultados */
+.fcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;margin-bottom:14px}
+.fcard .fhead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px}
+.fcard .ftitle{font-size:17px;font-weight:700;color:var(--txt)}
+.fcard .fsub{font-size:12px;color:var(--mut);margin:2px 0 14px}
+.fcard .fx{border:none;background:none;color:var(--danger);font-size:20px;cursor:pointer;line-height:1;padding:0 2px}
+.fsection{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#8a97a3;margin:16px 0 10px}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
+.fgrid.tres{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:520px){.fgrid,.fgrid.tres{grid-template-columns:1fr}}
+.fld{display:flex;flex-direction:column;min-width:0}
+.fld label{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:6px}
+.fld input{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;background:#f7f9fb;color:var(--txt);transition:border-color .12s,box-shadow .12s}
+.fld input::placeholder{color:#aeb8c2}
+.fld input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,157,220,.18);background:#fff}
+.fld input.ro{background:#eef4f8;color:var(--mut);font-weight:600}
+.fld .num{text-align:right;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v1.3</div>
+  <div class="sub">OFICA Representaciones · v1.4</div>
 </div>
 
 <div class="wrap">
@@ -103,17 +120,8 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
       <button class="btn btn-acc" id="btnXlsx"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Excel</button>
       <button class="btn btn-ghost" id="btnCsv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>CSV</button>
     </div>
-    <div class="ftbl-wrap">
-      <table class="ftbl">
-        <thead><tr>
-          <th>Archivo</th><th>Comercio</th><th>RIF comercio</th><th>Cédula o RIF</th>
-          <th>Nombre o Razón Social</th><th>Fecha y hora</th><th>Nº factura</th>
-          <th class="num">Base</th><th class="num">IVA</th><th class="num">Total</th><th></th>
-        </tr></thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
-    <div class="editnote">Toca cualquier celda para corregirla. La Base se recalcula sola (Total − IVA).</div>
+    <div id="lista-facturas"></div>
+    <div class="editnote">Revisa y corrige los campos si hace falta. La Base se calcula sola (Total − IVA).</div>
     <div class="toolbar" style="margin-top:14px">
       <label class="btn btn-ghost" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Agregar más</label>
     </div>
@@ -292,35 +300,56 @@ function baseDe(f){
   const iva=numVE(f.iva), tot=numVE(f.monto_total);
   return (iva!=null&&tot!=null)? Math.round((tot-iva)*100)/100 : null;
 }
-function pintarTabla(){
-  const tb=$('tbody'); tb.innerHTML='';
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Crea un campo con etiqueta e input, enlazado a filas[i][clave]
+function campo(i,clave,etiqueta,val,ph,opts){
+  opts=opts||{};
+  const cls=(opts.num?'num ':'')+(opts.ro?'ro':'');
+  const attrs=(opts.ro?'readonly ':'')+(opts.num?'inputmode="decimal" ':'');
+  return `<div class="fld"><label>${etiqueta}</label>`+
+    `<input class="${cls.trim()}" data-i="${i}" data-k="${clave}" ${attrs}value="${esc(val)}" placeholder="${esc(ph||'')}"></div>`;
+}
+
+function pintarFormularios(){
+  const cont=$('lista-facturas'); cont.innerHTML='';
   filas.forEach((f,i)=>{
     const base=baseDe(f);
-    const tr=document.createElement('tr');
-    tr.innerHTML=
-      `<td class="cod">${esc(f.archivo)}</td>`+
-      `<td contenteditable data-k="comercio">${esc(f.comercio)}</td>`+
-      `<td contenteditable data-k="rif_comercio" class="cod">${esc(f.rif_comercio)}</td>`+
-      `<td contenteditable data-k="cedula_rif" class="cod">${esc(f.cedula_rif)}</td>`+
-      `<td contenteditable data-k="nombre_razon_social">${esc(f.nombre_razon_social)}</td>`+
-      `<td contenteditable data-k="fecha_hora">${esc(f.fecha_hora)}</td>`+
-      `<td contenteditable data-k="numero_factura" class="cod">${esc(f.numero_factura)}</td>`+
-      `<td class="num base" data-base>${fmt(base)}</td>`+
-      `<td contenteditable data-k="iva" class="num">${fmt(numVE(f.iva))}</td>`+
-      `<td contenteditable data-k="monto_total" class="num">${fmt(numVE(f.monto_total))}</td>`+
-      `<td class="del" title="Eliminar">✕</td>`;
-    tr.querySelectorAll('td[contenteditable]').forEach(td=>{
-      td.addEventListener('input',()=>{
-        filas[i][td.dataset.k]=td.textContent.trim();
-        tr.querySelector('[data-base]').textContent=fmt(baseDe(filas[i]));
+    const card=document.createElement('div');
+    card.className='fcard';
+    card.innerHTML=
+      `<div class="fhead"><div>`+
+        `<div class="ftitle">Factura ${i+1}</div>`+
+        `<div class="fsub">${esc(f.archivo)}</div>`+
+      `</div><button class="fx" title="Eliminar" data-del="${i}">✕</button></div>`+
+      `<div class="fsection">Información general</div>`+
+      `<div class="fgrid">`+
+        campo(i,'nombre_razon_social','Nombre o Razón Social',f.nombre_razon_social,'Nombre del cliente')+
+        campo(i,'cedula_rif','Cédula o RIF',f.cedula_rif,'V-12345678')+
+        campo(i,'comercio','Comercio',f.comercio,'Nombre del comercio')+
+        campo(i,'rif_comercio','RIF del comercio',f.rif_comercio,'J-12345678-9')+
+        campo(i,'fecha_hora','Fecha y hora',f.fecha_hora,'DD-MM-AAAA HH:MM')+
+        campo(i,'numero_factura','Nº de factura',f.numero_factura,'00000000')+
+      `</div>`+
+      `<div class="fsection">Montos</div>`+
+      `<div class="fgrid tres">`+
+        campo(i,'monto_total','Total',fmt(numVE(f.monto_total)),'0.00',{num:true})+
+        campo(i,'iva','IVA',fmt(numVE(f.iva)),'0.00',{num:true})+
+        campo(i,'base','Base (Total − IVA)',fmt(base),'',{num:true,ro:true})+
+      `</div>`;
+    // Enlaces de edición
+    card.querySelectorAll('input:not([readonly])').forEach(inp=>{
+      inp.addEventListener('input',()=>{
+        filas[i][inp.dataset.k]=inp.value.trim();
+        const b=card.querySelector('input[data-k="base"]');
+        if(b) b.value=fmt(baseDe(filas[i]));
       });
     });
-    tr.querySelector('.del').addEventListener('click',()=>{ filas.splice(i,1); pintarTabla(); });
-    tb.appendChild(tr);
+    card.querySelector('[data-del]').addEventListener('click',()=>{ filas.splice(i,1); pintarFormularios(); });
+    cont.appendChild(card);
   });
   $('resBadge').textContent='✓ '+filas.length+' factura'+(filas.length!==1?'s':'');
 }
-const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 /* ---------- Flujo principal ---------- */
 async function procesar(files){
@@ -350,7 +379,7 @@ async function procesar(files){
   }
   await worker.terminate();
   $('progress').style.display='none';
-  pintarTabla();
+  pintarFormularios();
   $('scResult').style.display='block';
 }
 
