@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.3</div>
+  <div class="sub">OFICA Representaciones · v3.4</div>
 </div>
 
 <div class="wrap">
@@ -468,19 +468,22 @@ function parseFactura(text){
   const lineaImp=lines.find(l=>/(\bBI\b|IVA|JUA|1VA|I\.?V\.?A|IMPUESTO)/i.test(l) && /%/.test(l))
              || lines.find(l=>/%/.test(l) && (l.match(/Bs/gi)||[]).length>=2);
 
-  // Factura EXENTA de IVA: si aparece 'EXENTO/EXENTA', toda la factura está exenta → IVA = 0.
-  // Se confirma si el monto exento es igual al total, o si NO hay ninguna línea de impuesto (%).
-  let exenta=false;
+  // EXENTO: parte de la factura que no paga IVA. Regla:
+  //   • Exento = Total  → factura 100% exenta → IVA = 0  (Base = Total).
+  //   • Exento < Total  → parcial → IVA = Total − Exento  (Base = Total − IVA = Exento).
+  //   Ambas se resumen en: IVA = Total − Exento (nunca negativo).
+  let exe=null;
   const lineaEx=lines.find(l=>/EXENT[OA]/i.test(l));
   if(lineaEx){
     const msEx=montosLinea(lineaEx);
-    if(d.monto_total==null && msEx.length) d.monto_total=Math.max(...msEx);
-    if(d.monto_total!=null && msEx.some(v=>Math.abs(v-d.monto_total)<=0.5)) exenta=true; // monto exento = total
-    else if(!lineaImp) exenta=true;                                                       // no hay línea de IVA
+    if(msEx.length) exe=Math.max(...msEx);               // monto exento leído en esa línea
+    if(d.monto_total==null && exe!=null) d.monto_total=exe;
   }
 
-  if(exenta){
-    d.iva=0;                                             // exenta: IVA = 0 (base = total)
+  if(lineaEx && exe!=null && exe>0 && d.monto_total!=null){
+    d.iva=Math.max(0, Math.round((d.monto_total-exe)*100)/100);   // IVA = Total − Exento
+  }else if(lineaEx && !lineaImp){
+    d.iva=0;                                             // hay EXENTO (sin monto legible) y sin línea de IVA
   }else if(lineaImp){
     const ms=montosLinea(lineaImp);
     if(ms.length){
