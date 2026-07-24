@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.8</div>
+  <div class="sub">OFICA Representaciones · v3.9</div>
 </div>
 
 <div class="wrap">
@@ -484,16 +484,40 @@ function parseFactura(text){
     }
   }
 
-  // Fecha y hora (tolerante a espacios/guiones sueltos del OCR)
-  const mF=t.match(/FECHA\s*[:\-]?\s*(\d{1,2}\s*[-\/]\s*-?\s*\d{1,2}\s*[-\/]\s*\d{2,4})/i);
-  const mH=t.match(/HORA\s*[:\-]?\s*(\d{1,2}:\d{2})/i);
-  const fecha=mF? mF[1].replace(/\s+/g,'').replace(/-+/g,'-') : null;
-  d.fecha_hora=[fecha, mH&&mH[1]].filter(Boolean).join(' ');
+  // El OCR a veces lee dígitos como letras (0→O/o/Q, 1→I/l/L). Se normalizan a números.
+  const limpiaDig=s=>s.replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1');
 
-  // Número de factura. El OCR a veces lee los ceros/unos iniciales como letras (O, o, I, l);
-  // se aceptan y se normalizan a dígitos.
-  const mNf=t.match(/FACTURA\s*N?[°º]?\s*[:\-]?\s*([\dOoQIlL]{4,})/i);
-  if(mNf){ const n=mNf[1].replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1'); if(/^\d{4,}$/.test(n)) d.numero_factura=n; }
+  // Fecha y hora. Tolerante a O/o/I/l por dígitos y a separadores . - /
+  const mF=t.match(/FECHA\s*[:\-.]?\s*([\dOoIlL]{1,2}\s*[-\/.]\s*-?\s*[\dOoIlL]{1,2}\s*[-\/.]\s*[\dOoIlL]{2,4})/i);
+  let fecha=mF? limpiaDig(mF[1]).replace(/\s+/g,'').replace(/[.\/]/g,'-').replace(/-+/g,'-') : null;
+  if(!fecha){                                   // respaldo: cualquier fecha dd-mm-aaaa en el texto
+    const m2=limpiaDig(t).match(/\b([0-3]?\d)[-\/.]([01]?\d)[-\/.]((?:20)?\d{2})\b/);
+    if(m2) fecha=m2[1]+'-'+m2[2]+'-'+m2[3];
+  }
+  const mH=t.match(/HORA\s*[:\-]?\s*([\dOoIlL]{1,2}\s*[:.]\s*[\dOoIlL]{2})/i);
+  const hora=mH? limpiaDig(mH[1]).replace(/\s+/g,'').replace('.',':') : null;
+  d.fecha_hora=[fecha, hora].filter(Boolean).join(' ');
+
+  // Nº de factura. Puede estar a la derecha de 'FACTURA:' (gran espacio) o el OCR daña la etiqueta.
+  // Se busca en la línea de 'FACTURA:' y, como respaldo, en la línea justo ENCIMA de 'FECHA:'
+  // (donde siempre va). Se ignoran los números con prefijo de letra (RIF/códigos).
+  const numFactDe=str=>{
+    const ms=[...str.matchAll(/([A-Za-z-]?)\s*([\dOoQIlL]{4,})/g)];
+    for(let x=ms.length-1;x>=0;x--){            // de derecha a izquierda (el nº suele ir a la derecha)
+      if(ms[x][1]) continue;                     // saltar si viene tras letra/guion (RIF, códigos)
+      const n=limpiaDig(ms[x][2]);
+      if(/^\d{4,}$/.test(n)) return n;
+    }
+    return '';
+  };
+  let nf='';
+  const lFact=lines.find(l=>/FACT\w*\s*[:.]/i.test(l) && !/^\s*FACT\w*\s*$/i.test(l));
+  if(lFact) nf=numFactDe(lFact.replace(/^.*?FACT\w*\s*N?[°º]?\s*[:.]/i,''));
+  if(!nf){
+    const iFecha=lines.findIndex(l=>/FECHA\s*[:\-.]/i.test(l));
+    if(iFecha>0) for(let j=iFecha-1;j>=Math.max(0,iFecha-2)&&!nf;j--) nf=numFactDe(lines[j]);
+  }
+  d.numero_factura=nf;
 
   // Total: el total real está en las líneas de RESUMEN (TOTAL / EXENTO / A PAGAR), normalmente
   // repetido varias veces; ahí se lee mucho mejor que agarrando el mayor monto suelto (que podría
