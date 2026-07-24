@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.9</div>
+  <div class="sub">OFICA Representaciones · v4.0</div>
 </div>
 
 <div class="wrap">
@@ -474,6 +474,7 @@ function parseFactura(text){
   const ir=lines.findIndex(l=>/S[O0]CIAL\s*[:\-]/i.test(l) || /[RK]AZ[OÓ0]N\s+S[O0]CIAL/i.test(l));
   if(ir>=0){
     let rem=lines[ir].replace(/.*S[O0]CIAL\s*[:\-]?\s*/i,'').trim();
+    rem=rem.replace(/^cliente\s*:?\s*/i,'').trim();   // quita un 'Cliente:' que a veces precede al nombre
     const palabras=rem.split(/\s+/).filter(w=>/[A-Za-zÁÉÍÓÚÑ]{2,}/.test(w));
     if(palabras.length>=2){ d.nombre_razon_social=rem; }
     else{
@@ -498,9 +499,9 @@ function parseFactura(text){
   const hora=mH? limpiaDig(mH[1]).replace(/\s+/g,'').replace('.',':') : null;
   d.fecha_hora=[fecha, hora].filter(Boolean).join(' ');
 
-  // Nº de factura. Puede estar a la derecha de 'FACTURA:' (gran espacio) o el OCR daña la etiqueta.
-  // Se busca en la línea de 'FACTURA:' y, como respaldo, en la línea justo ENCIMA de 'FECHA:'
-  // (donde siempre va). Se ignoran los números con prefijo de letra (RIF/códigos).
+  // Nº de factura. El OCR suele separarlo de 'FACTURA:' y dejarlo suelto (a veces junto a 'HORA:').
+  // Estrategias en orden: 1) en la línea 'FACTURA:'; 2) línea sola pegada a 'HORA:'/'FECHA:';
+  //                       3) número con ceros a la izquierda en su propia línea (típico: 00041077).
   const numFactDe=str=>{
     const ms=[...str.matchAll(/([A-Za-z-]?)\s*([\dOoQIlL]{4,})/g)];
     for(let x=ms.length-1;x>=0;x--){            // de derecha a izquierda (el nº suele ir a la derecha)
@@ -510,12 +511,16 @@ function parseFactura(text){
     }
     return '';
   };
+  const numSolo=l=>{ const m=l.match(/^\s*([\dOoQIlL]{5,9})\s*$/); if(!m) return ''; const n=limpiaDig(m[1]); return /^\d{5,9}$/.test(n)?n:''; };
   let nf='';
   const lFact=lines.find(l=>/FACT\w*\s*[:.]/i.test(l) && !/^\s*FACT\w*\s*$/i.test(l));
-  if(lFact) nf=numFactDe(lFact.replace(/^.*?FACT\w*\s*N?[°º]?\s*[:.]/i,''));
-  if(!nf){
-    const iFecha=lines.findIndex(l=>/FECHA\s*[:\-.]/i.test(l));
-    if(iFecha>0) for(let j=iFecha-1;j>=Math.max(0,iFecha-2)&&!nf;j--) nf=numFactDe(lines[j]);
+  if(lFact) nf=numFactDe(lFact.replace(/^.*?FACT\w*\s*N?[°º]?\s*[:.]/i,''));   // 1)
+  if(!nf){                                                                     // 2) pegado a HORA/FECHA
+    const iHF=lines.findIndex(l=>/\b(HORA|FECHA)\b/i.test(l));
+    if(iHF>=0) for(const j of [iHF-1,iHF+1,iHF-2]){ if(j>=0&&j<lines.length){ const n=numSolo(lines[j]); if(n){ nf=n; break; } } }
+  }
+  if(!nf){                                                                     // 3) ceros a la izquierda, línea sola
+    for(const l of lines){ if(/REF|RIF/i.test(l)) continue; const n=numSolo(l); if(n && n[0]==='0'){ nf=n; break; } }
   }
   d.numero_factura=nf;
 
