@@ -1,0 +1,4 @@
+anthropic>=0.69
+openpyxl>=3.1
+pydantic>=2.0
+flask>=3.0
