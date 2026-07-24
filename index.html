@@ -120,7 +120,7 @@ table.ftbl .del{color:var(--danger);cursor:pointer;text-align:center;font-weight
 <body>
 <div class="hdr">
   <h1>Procesador de Facturas</h1>
-  <div class="sub">OFICA Representaciones · v3.1</div>
+  <div class="sub">OFICA Representaciones · v3.2</div>
 </div>
 
 <div class="wrap">
@@ -256,55 +256,52 @@ function guardarComercioDeFila(f){
   return true;
 }
 
-/* ---------- Tasa de cambio del BCV (base de datos local, diaria) ---------- */
-// La tasa se guarda por FECHA en localStorage ('tasasBCV'). Para cada factura se usa la
-// tasa BCV del DÍA de la factura (no la de hoy). Fuentes con CORS:
-//   • Hoy:        ve.dolarapi.com  (campo 'promedio')
-//   • Histórica:  pydolarve.org    (tasa oficial del BCV para una fecha dada)
+/* ---------- Tasa de cambio del BCV (misma lógica y repositorio que la app de cobranza) ----------
+   La base de datos diaria de tasas es la MISMA que usa https://boadar.github.io/reporte-cobranza/:
+     • Base diaria:  tasas.json del repo de cobranza  →  { "AAAA-MM-DD": [tasa$, tasa€], ... }
+     • Respaldo hoy: ve.dolarapi.com (campo 'promedio') guardado en localStorage 'tasasEnVivo'
+   Como ambas apps están en el mismo dominio (boadar.github.io), 'tasasEnVivo' se comparte entre
+   las dos: lo que una consulta en vivo, la otra lo aprovecha. Cada factura usa la tasa de SU fecha. */
 const TASA_API='https://ve.dolarapi.com/v1/dolares/oficial';
-const TASA_HIST='https://pydolarve.org/api/v2/tipo-cambio';
+const TASAS_URL='https://boadar.github.io/reporte-cobranza/tasas.json';
 const pad2=n=>String(n).padStart(2,'0');
 const hoyIso=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
-let TASAS_BCV=(()=>{ try{ return JSON.parse(localStorage.getItem('tasasBCV')||'{}'); }catch(e){ return {}; } })();
-function guardarTasasBCV(){ try{ localStorage.setItem('tasasBCV', JSON.stringify(TASAS_BCV)); }catch(e){} }
-// Extrae el valor de la tasa de una respuesta JSON (tolerante a distintos formatos de API).
-function leerTasaJson(j){
-  if(!j||typeof j!=='object') return null;
-  const cand=[j.promedio,j.price,j.tipo_cambio,j.tasa,j.valor,
-             j.monitors&&j.monitors.usd&&(j.monitors.usd.price||j.monitors.usd.promedio),
-             j.usd&&(j.usd.promedio||j.usd.price)];
-  for(const c of cand){ const v=Number(c); if(v>0) return v; }
-  return null;
+let TASAS={};   // iso -> [tasa$, tasa€]  (misma forma que la app de cobranza)
+
+// Recupera las tasas del día consultadas en vivo (compartidas con cobranza; mismo dominio).
+function cargarTasasVivoLocal(){
+  try{
+    const o=JSON.parse(localStorage.getItem('tasasEnVivo')||'{}');
+    for(const k in o){ if(/^\d{4}-\d{2}-\d{2}$/.test(k) && Array.isArray(o[k]) && o[k][0]!=null && !TASAS[k]) TASAS[k]=o[k]; }
+  }catch(e){}
 }
-async function actualizarTasaHoy(){
+// Guarda una tasa consultada en vivo (mismo formato y misma clave que cobranza: 'tasasEnVivo').
+function guardarTasaVivo(iso,usd,eur){
+  TASAS[iso]=[usd, eur!=null?eur:null];
+  try{ const o=JSON.parse(localStorage.getItem('tasasEnVivo')||'{}'); o[iso]=[usd, eur!=null?eur:null]; localStorage.setItem('tasasEnVivo',JSON.stringify(o)); }catch(e){}
+}
+// Baja la base diaria de tasas desde el repo de cobranza (misma fuente que la app de pagos).
+async function refrescarTasas(){
+  try{
+    const r=await fetch(TASAS_URL+'?t='+Date.now(),{cache:'no-store'});
+    if(!r.ok) throw 0;
+    const j=await r.json();
+    if(j&&typeof j==='object'){
+      for(const k in j){ if(!/^\d{4}-\d{2}-\d{2}$/.test(k))continue; const v=j[k]; if(Array.isArray(v)&&v[0]!=null) TASAS[k]=v; }
+    }
+  }catch(e){ /* sin señal: se usa lo que ya haya (tasas en vivo locales) */ }
+}
+// Respaldo: si la base no trae la tasa de HOY, se consulta en vivo (dolarapi) igual que cobranza.
+async function consultarTasaHoy(){
   const iso=hoyIso();
-  if(TASAS_BCV[iso]!=null) return TASAS_BCV[iso];   // ya la tenemos guardada hoy
+  if(TASAS[iso]&&TASAS[iso][0]!=null) return TASAS[iso][0];
   try{
     const r=await fetch(TASA_API+'?t='+Date.now(),{cache:'no-store'});
     if(!r.ok) throw 0;
-    const usd=leerTasaJson(await r.json());
-    if(usd>0){ TASAS_BCV[iso]=usd; guardarTasasBCV(); return usd; }
-  }catch(e){ /* sin internet o API caída: se usa lo que haya guardado */ }
-  return TASAS_BCV[iso]!=null?TASAS_BCV[iso]:null;
-}
-// Trae la tasa oficial del BCV para una fecha concreta (histórica) y la guarda en la tabla.
-const _tasasIntentadas=new Set();   // fechas ya intentadas en esta sesión (evita repetir la red)
-async function asegurarTasaFecha(iso){
-  if(!iso) return null;
-  if(TASAS_BCV[iso]!=null) return TASAS_BCV[iso];       // ya está en la tabla
-  if(iso===hoyIso()) return await actualizarTasaHoy();  // hoy: usa la fuente del día
-  if(_tasasIntentadas.has(iso)) return null;
-  _tasasIntentadas.add(iso);
-  const [y,mo,d]=iso.split('-');
-  const fecha=d+'-'+mo+'-'+y;                            // pydolarve usa DD-MM-YYYY
-  try{
-    const r=await fetch(TASA_HIST+'?fecha='+fecha+'&moneda=usd&t='+Date.now(),{cache:'no-store'});
-    if(r.ok){
-      const v=leerTasaJson(await r.json());
-      if(v>0){ TASAS_BCV[iso]=v; guardarTasasBCV(); return v; }
-    }
-  }catch(e){ /* histórico no disponible: se usará la tasa más cercana guardada */ }
-  return null;
+    const usd=Number((await r.json()).promedio);
+    if(usd>0){ guardarTasaVivo(iso,usd,null); return usd; }
+  }catch(e){ /* sin internet: se usa lo que haya guardado */ }
+  return TASAS[iso]&&TASAS[iso][0]!=null?TASAS[iso][0]:null;
 }
 function isoDeFecha(fh){
   const m=(fh||'').match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
@@ -312,21 +309,23 @@ function isoDeFecha(fh){
   let d=m[1], mo=m[2], y=m[3]; if(y.length===2) y='20'+y;
   return y+'-'+pad2(mo)+'-'+pad2(d);
 }
-// Tasa para la fecha de la factura. Prioridad:
+// Tasa (Bs/$) para la fecha de la factura. Prioridad:
 //   1) la tasa exacta de esa fecha,
 //   2) la última tasa publicada EN O ANTES de esa fecha (la vigente ese día),
-//   3) si la factura es anterior a todo lo guardado, la más antigua disponible.
+//   3) si la factura es anterior a todo lo disponible, la más antigua.
 function tasaParaFecha(fh){
   const iso=isoDeFecha(fh);
-  if(iso && TASAS_BCV[iso]!=null) return TASAS_BCV[iso];
-  const ks=Object.keys(TASAS_BCV).sort();
+  if(iso && TASAS[iso] && TASAS[iso][0]!=null) return TASAS[iso][0];
+  const ks=Object.keys(TASAS).filter(k=>TASAS[k]&&TASAS[k][0]!=null).sort();
   if(!ks.length) return null;
   if(iso){
     let prev=null; for(const k of ks){ if(k<=iso) prev=k; else break; }
-    return prev!=null ? TASAS_BCV[prev] : TASAS_BCV[ks[0]];
+    return prev!=null ? TASAS[prev][0] : TASAS[ks[0]][0];
   }
-  return TASAS_BCV[ks[ks.length-1]];   // sin fecha legible: la más reciente
+  return TASAS[ks[ks.length-1]][0];   // sin fecha legible: la más reciente
 }
+cargarTasasVivoLocal();   // al arrancar, recupera las tasas en vivo compartidas con cobranza
+refrescarTasas();         // y baja la base diaria del repo de cobranza (en segundo plano)
 
 /* ---------- Utilidades de números (formato venezolano) ---------- */
 function numVE(s){
@@ -662,20 +661,10 @@ function pintarFormularios(){
           }
         }
         const set=(kk,v)=>{const el=card.querySelector('input[data-k="'+kk+'"]'); if(el) el.value=fmt(v);};
-        // Al corregir la FECHA, recalcular la tasa BCV de esa fecha desde la tabla (y traer la histórica).
+        // Al corregir la FECHA, recalcular la tasa BCV de esa fecha desde la base de cobranza.
         if(k==='fecha_hora'){
           const t=tasaParaFecha(f.fecha_hora);
-          if(t!=null){ f.tasa_cambio=t; set('tasa_cambio',numVE(t)); }
-          const isoF=isoDeFecha(f.fecha_hora);
-          if(isoF && TASAS_BCV[isoF]==null){
-            asegurarTasaFecha(isoF).then(v=>{
-              if(v>0 && filas[i]===f){
-                f.tasa_cambio=v; set('tasa_cambio',v);
-                const bs2=baseDe(f);
-                set('base_usd',enUsd(bs2,f)); set('iva_usd',enUsd(numVE(f.iva),f)); set('total_usd',totalUsd(f));
-              }
-            });
-          }
+          if(t!=null){ f.tasa_cambio=t; set('tasa_cambio',t); }
         }
         const bs=baseDe(f);
         set('base',bs); set('base_usd',enUsd(bs,f));
@@ -716,8 +705,9 @@ async function procesar(files){
   $('scResult').style.display='none';
   $('scReport').style.display='none';
   $('progress').style.display='block';
-  $('pmsg').textContent='Consultando tasa del BCV…';
-  await actualizarTasaHoy();        // alimenta la tasa del día desde el BCV (dolarapi)
+  $('pmsg').textContent='Consultando tasas del BCV…';
+  await refrescarTasas();           // baja la base diaria de tasas del repo de cobranza
+  await consultarTasaHoy();         // respaldo: tasa de hoy en vivo si la base no la trae
   $('pmsg').textContent='Preparando OCR…';
   const worker=await crearWorker();
   for(let i=0;i<files.length;i++){
@@ -734,8 +724,7 @@ async function procesar(files){
       d.direccion_fiscal='';
       const c=matchComercio(text, d.rif_comercio);   // ¿lo reconoce la base de datos?
       if(c){ d.comercio=c.nombre; d.rif_comercio=c.rif; d.direccion_fiscal=c.direccion||''; d.reconocido=true; }
-      await asegurarTasaFecha(isoDeFecha(d.fecha_hora)); // trae la tasa BCV histórica de esa fecha
-      d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV para la fecha de la factura
+      d.tasa_cambio=tasaParaFecha(d.fecha_hora);      // tasa BCV de la fecha de la factura (base de cobranza)
       if(facturaDuplicada(d)) d.duplicada=true;        // ¿ya está entre las facturas procesadas?
       filas.push({archivo:f.name, texto:text, ...d});
     }catch(e){
@@ -844,18 +833,18 @@ $('btnCsv').onclick=()=>{
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='facturas.csv'; a.click();
 };
 
-// Exporta a Excel toda la tabla de tasas BCV guardadas (una fila por fecha).
+// Exporta a Excel toda la base de tasas BCV disponibles (una fila por fecha).
 function matrizTasas(){
-  const rows=[['Fecha','Tasa BCV (Bs/$)']];
-  Object.keys(TASAS_BCV).sort().forEach(iso=>{
-    const [y,m,d]=iso.split('-');
-    rows.push([d+'-'+m+'-'+y, fmt(numVE(TASAS_BCV[iso]))]);
+  const rows=[['Fecha','Tasa BCV (Bs/$)','Tasa (Bs/€)']];
+  Object.keys(TASAS).filter(k=>TASAS[k]&&TASAS[k][0]!=null).sort().forEach(iso=>{
+    const [y,m,d]=iso.split('-'); const v=TASAS[iso];
+    rows.push([d+'-'+m+'-'+y, fmt(numVE(v[0])), v[1]!=null?fmt(numVE(v[1])):'']);
   });
   return rows;
 }
-function exportarTasas(){
-  const n=Object.keys(TASAS_BCV).length;
-  if(!n){ alert('Aún no hay tasas de cambio guardadas. Se guardan al procesar facturas o al abrir la app con internet.'); return; }
+async function exportarTasas(){
+  if(!Object.keys(TASAS).length) await refrescarTasas();   // asegura tener la base al día
+  if(!Object.keys(TASAS).length){ alert('No se pudieron cargar las tasas. Revisa tu conexión a internet e intenta de nuevo.'); return; }
   const ws=XLSX.utils.aoa_to_sheet(matrizTasas());
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Tasas BCV');
   XLSX.writeFile(wb,'tasas_bcv.xlsx');
